@@ -1,0 +1,160 @@
+objects = [[
+<objects>
+  <object>
+    objectID=sendFile
+    objectType=Button
+    defaultWidth=14
+    defaultHeight=3
+    text=Send file
+  </object>
+  <object>
+    objectID=recFile
+    objectType=Button
+    defaultWidth=14
+    defaultHeight=3
+    text=Send file
+  </object>
+  <object>
+    objectID=fileInput
+    objectType=Input
+    message=Please enter the name of the file that you want to send.
+  </object>
+  <object>
+    objectID=idInput
+    objectType=Input
+    message=Please enter the ID of the computer.
+  </object>
+</objects>
+]]
+
+local args = { ... }
+local callType
+local objectID
+local systemInfo
+
+local modemSide = "right"
+
+function sendFile()
+os.sleep(2)
+  computerID = tonumber(systemInfo.userInputs.idInput)
+  filename = systemInfo.userInputs.fileInput
+  
+  if (computerID == nil or filename == nil or not fs.exists(filename)) then
+    return
+  end
+  
+  finished = false
+  while not finished do
+    rednet.send(computerID, "bluetooth.connect")
+    os.startTimer(1)
+    local e,p1,p2,p3 = os.pullEvent()
+    if e == "rednet_message" then
+      local id,msg = p1,p2
+      if msg == "bluetooth.accept" then
+        finished = true
+      end
+    elseif e == "monitor_touch" then
+      return
+    end
+  end
+  
+  sleep(0.8)
+  rednet.send(computerID, "bluetooth.filename:" .. filename)
+  
+  sleep(0.5)
+    local sr = fs.open(filename, "r")
+    
+    local data
+    while true do
+      data = sr.readLine()
+      if data == nil then
+        break
+      end
+      rednet.send(computerID, "bluetooth.file:" .. data)
+      sleep(0.1)
+    end
+    rednet.send(computerID, "bluetooth.done")
+end
+
+function receiveFile()
+  while true do
+    local e,p1,p2,p3 = os.pullEvent()
+    if e == "rednet_message" then
+      local id,msg = p1,p2
+      if msg == "bluetooth.scan" then
+        sleep(0.1)
+        rednet.send(id, "bluetooth.scan.reply:" .. os.getComputerLabel())
+      elseif msg == "bluetooth.connect" then
+        local remoteID = id
+        rednet.send(id, "bluetooth.accept")
+        
+        local filename
+        
+        local id,msg = "",""
+        while true do
+          id,msg = rednet.receive()
+          
+          if id == remoteID and string.sub(msg, 1, #"bluetooth.filename:") == "bluetooth.filename:" then
+            filename = string.sub(msg, #"bluetooth.filename:" + 1)
+            break
+          end
+        end
+        
+        if fs.exists(filename) then
+          fs.delete(filename)
+        end
+        
+        local file = fs.open(filename, "w")
+        
+        local id,msg
+        while true do
+          id,msg = rednet.receive()
+          if id == remoteID then
+            if string.sub(msg, 1, #"bluetooth.file:") == "bluetooth.file:" then
+              local subbedData = string.sub(msg, #"bluetooth.file:" + 1)
+              
+              file.writeLine(subbedData)
+            elseif msg == "bluetooth.done" then
+              file.flush()
+              file.close()
+              
+              break
+            end
+          end
+        end
+      end
+    elseif e == "monitor_touch" then
+      break
+    end
+  end
+end
+
+function showObject()
+  
+end
+
+function callFunction()
+  rednet.open(modemSide)
+  
+  if (objectID == "recFile") then
+    receiveFile()
+  elseif (objectID == "sendFile") then
+    sendFile()
+  end
+end
+
+function main()
+  if (#args == 3) then
+    callType = args[1]
+    objectID = args[2]
+    systemInfo = textutils.unserialize(args[3])
+    
+    if (callType == "Show") then
+      showObject()
+    elseif (callType == "Click") then
+      callFunction()
+    end
+  end
+end
+
+main()

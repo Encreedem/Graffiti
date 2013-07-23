@@ -1,0 +1,62 @@
+local objects =
+[[
+<objects>
+  <object>
+    objectID=idInput
+    objectType=Input
+    message=Enter the ID of the computer.
+  </object>
+  <object>
+    objectID=messageInput
+    objectType=Input
+    message=Enter the message that you want to send.
+  </object>
+  <object>
+    objectID=messageSender
+    objectType=Button
+    defaultWidth=14
+    defaultHeight=3
+    text=Send!
+  </object>
+</objects>
+]]
+
+local args = { ... }
+local callType
+local objectID
+local systemInfo
+
+-- Gets called when an object with type "Custom"
+-- needs to be displayed.
+function showObject()
+  
+end
+
+-- Gets called when a button or a custom object
+-- with canClick attribute gets clicked.
+function callFunction()
+  if (objectID == "messageSender") then
+    id = tonumber(systemInfo["userInputs"]["idInput"])
+    message = systemInfo.userInputs.messageInput
+    if (id == nil or message == nil) then
+      return
+    end
+    
+    rednet.open("right")
+    rednet.send(id, message)
+  end
+end
+
+function main()
+  callType = args[1]
+  objectID = args[2]
+  systemInfo = textutils.unserialize(args[3])
+  
+  if (callType == "Show") then
+    showObject()
+  elseif (callType == "Click") then
+    callFunction()
+  end
+end
+
+main()
