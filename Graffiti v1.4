@@ -1,4 +1,4 @@
-local version = "Graffiti v1.2"
+local version = "Graffiti v1.4"
 
 -- fields for users
 local userFunctions = {}
@@ -7,7 +7,7 @@ local selectedItems = {}
 local userInputs = {}
 
 --monitor
-local monitorSide = "left"
+local monitorSide = ""
 local monitor = nil
 
 -- texts
@@ -45,6 +45,8 @@ local showEditorOptions = false
 local editActions = { "Design", "Attributes", "Delete" }
 local lastScreen = "mainScreen"
 local editorFunctions = {}
+local objectTypes = { "Button", "Text", "Variable", "Slider", "Input", "List" }
+local rightClickActions = {"Attributes", "Delete" }
 
 -- AddOn options
 local addOns = {}
@@ -54,12 +56,14 @@ local addOnExtension = ".add"
 local args = { ... }
 local quit = false
 local maxX, maxY = 51, 19
+local out = term -- Output: either "term" or the monitor
+local outIsTerm = true
 local autoLoadObjects = true
 local changeButtonColor = true
 local screens = {}
 screens.mainScreen = {}
 local currentScreen = "mainScreen"
-local objectTypes = { "Button", "Text", "Variable", "Slider", "Input", "List" }
+local sides = { "left", "top", "right", "bottom", "front", "back" }
 
 -- Displays a star in the upper left corner for a
 -- short amount of time. Used when you want to see
@@ -67,11 +71,11 @@ local objectTypes = { "Button", "Text", "Variable", "Slider", "Input", "List" }
 -- Should only be used when you are desperately
 -- looking for a bug.
 function extremeDebug()
-  term.setCursorPos(1, 1)
-  term.write("*")
+  out.setCursorPos(1, 1)
+  out.write("*")
   os.sleep(0.5)
-  term.setCursorPos(1, 1)
-  term.write(" ")
+  out.setCursorPos(1, 1)
+  out.write(" ")
   os.sleep(0.5)
 end
 
@@ -128,17 +132,35 @@ end
 -- shouldn't be edited! If you do so and the program
 -- doesn't work any more then it's your fault!
 
-function readUserInput(message, isPassword)
-  term.restore()
-  print(message)
+function getCursorInput()
+  local finished = false
   
+  while not finished do
+    event, param, x, y = os.pullEvent()
+    
+    if (event == "monitor_touch" and not outIsTerm) then
+      mouseButton = 1
+      finished = true
+    elseif (event == "mouse_click" and outIsTerm) then
+      mouseButton = param
+      finished = true
+    end
+  end
+  
+  return x, y, mouseButton
+end
+
+function readUserInput(message, isPassword)
+  if not outIsTerm then
+    print(message)
+  end
+    
   if isPassword  then
     ret = read("*")
   else
     ret = read()
   end
   
-  term.redirect(monitor)
   return ret
 end
 
@@ -159,44 +181,52 @@ function getUserInput(inputObject)
   maxLength = inputObject.maxLength
   
   existingInput = userInputs[inputID]
+  out.setBackgroundColor(colors.black)
+  out.setCursorPos(x, y)
   if (existingInput ~= nil) then -- Clear the text on the input object.
-    term.setCursorPos(x, y)
     for i = -1, string.len(existingInput) do
-      term.write(" ")
+      out.write(" ")
     end
-    
-    userInputs[inputID] = nil
+  else
+    out.write("  ")
+  end
+  userInputs[inputID] = nil
+  
+  out.setCursorPos(x, y)
+  if not outIsTerm then
+    -- make the input-object yellow
+    out.setBackgroundColor(colors.yellow)
+    out.write("  ")
+    out.setBackgroundColor(colors.black)
   end
   
-  -- make the input-object yellow
-  term.setCursorPos(x, y)
-  term.setBackgroundColor(colors.yellow)
-  term.write("  ")
-  term.setBackgroundColor(colors.black)
+  if outIsTerm then
+    out.setCursorPos(x + 1, y)
+  end
   
   userInput = readUserInput(message, isPassword)
   if (userInput ~= nil) then
     userInputs[inputID] = userInput
   end
   
-  term.setCursorPos(x, y)
-  term.setBackgroundColor(colors.white)
-  term.setTextColor(colors.black)
+  out.setCursorPos(x, y)
+  out.setBackgroundColor(colors.white)
+  out.setTextColor(colors.black)
   
-  term.write(" ")
+  out.write(" ")
   if (userInput ~= nil and userInput ~= "") then
     if isPassword then
       for i = 1, string.len(userInput) do
-        term.write("*")
+        out.write("*")
       end
     else
-      term.write(userInput)
+      out.write(userInput)
     end
   end
   
-  term.write(" ")
-  term.setBackgroundColor(colors.black)
-  term.setTextColor(colors.white)
+  out.write(" ")
+  out.setBackgroundColor(colors.black)
+  out.setTextColor(colors.white)
   
   return ret
 end
@@ -216,9 +246,15 @@ end
 
 -- display objects region start --
 
+function drawPixel(x, y, color)
+  out.setCursorPos(x, y)
+  out.setBackgroundColor(color)
+  out.write(" ")
+end
+
 -- Displays a line at the given coordinates.
 function showLine(x, y, direction, length, color)
-  term.setBackgroundColor(color)
+  out.setBackgroundColor(color)
   
   direction = (isValidDirection(direction)) and direction or "right"
   local addX, addY = 1, 0
@@ -235,7 +271,7 @@ function showLine(x, y, direction, length, color)
   end
   
   for i = 1, length do
-    paintutils.drawPixel(currentX, currentY, color)
+    drawPixel(currentX, currentY, color)
     currentX = currentX + addX
     currentY = currentY + addY
   end
@@ -245,11 +281,11 @@ end
 function showBox(x, y, width, height, color)
   for row = x, x + width - 1 do
     for col = y, y + height - 1 do
-      paintutils.drawPixel(row, col, color)
+      drawPixel(row, col, color)
     end
   end
   
-  term.setBackgroundColor(colors.black)
+  out.setBackgroundColor(colors.black)
 end
 
 -- Displays the text on the screen.
@@ -264,8 +300,8 @@ function showText(textObject)
   assert(x, "Text: X-coordinate has to be set!")
   assert(y, "Text: Y-coordinate has to be set!")
   
-  term.setCursorPos(x, y)
-  term.write(text)
+  out.setCursorPos(x, y)
+  out.write(text)
 end
 
 -- Displays the slider on the screen.
@@ -285,29 +321,29 @@ function showSlider(slider, fillPercentage)
   if (direction == "left") then
     addX, addY = -1, 0
     startSymbol, endSymbol = ">", "<"
-    term.setCursorPos(x - length, y)
-    term.write(endSymbol)
+    out.setCursorPos(x - length, y)
+    out.write(endSymbol)
   elseif (direction == "up") then
     addX, addY = 0, -1
     startSymbol, endSymbol = "V", "^"
-    term.setCursorPos(x, y - length)
-    term.write(endSymbol)
+    out.setCursorPos(x, y - length)
+    out.write(endSymbol)
   elseif (direction == "right") then
     addX, addY = 1, 0
     startSymbol, endSymbol = "<", ">"
-    term.setCursorPos(x + length, y)
-    term.write(endSymbol)
+    out.setCursorPos(x + length, y)
+    out.write(endSymbol)
   elseif (direction == "down") then
     addX, addY = 0, 1
     startSymbol, endSymbol = "^", "V"
-    term.setCursorPos(x, y + length)
-    term.write(endSymbol)
+    out.setCursorPos(x, y + length)
+    out.write(endSymbol)
   else -- return if it's not a valid direction, even if I checked it before
     return
   end
   
-  term.setCursorPos(x, y)
-  term.write(startSymbol)
+  out.setCursorPos(x, y)
+  out.write(startSymbol)
   
   if (fillPercentage ~= nil) then
     if (fillPercentage < 33) then
@@ -322,7 +358,7 @@ function showSlider(slider, fillPercentage)
     showLine(x + addX, y + addY, direction, filled, sliderColor)
   end
   
-  term.setBackgroundColor(colors.black)
+  out.setBackgroundColor(colors.black)
 end
 
 -- Displays the given button on the screen.
@@ -342,11 +378,11 @@ function showButton(button, color)
   -- Tries to center the text in the button.
   textCol = x + math.floor((width - string.len(text)) / 2)
   textRow = y + math.ceil(height / 2) - 1
-  term.setCursorPos(textCol, textRow)
-  term.setBackgroundColor(color)
-  term.write(text)
+  out.setCursorPos(textCol, textRow)
+  out.setBackgroundColor(color)
+  out.write(text)
   
-  term.setBackgroundColor(colors.black)
+  out.setBackgroundColor(colors.black)
 end
 
 -- Displays the input-object (two white spaces)
@@ -359,15 +395,15 @@ function showInput(inputObject)
   x = inputObject.x
   y = inputObject.y
   
-  term.setCursorPos(x, y)
-  term.setBackgroundColor(inputDefaultColor)
-  term.write(" ")
+  out.setCursorPos(x, y)
+  out.setBackgroundColor(inputDefaultColor)
+  out.write(" ")
   if (userInputs[inputID] ~= nil) then
-    term.write(userInputs[inputID])
+    out.write(userInputs[inputID])
   end
-  term.write(" ")
+  out.write(" ")
   
-  term.setBackgroundColor(colors.black)
+  out.setBackgroundColor(colors.black)
 end
 
 -- Used by "showList" and "showSelector" to
@@ -425,27 +461,27 @@ function showList(listObject)
   
   posY = 0
   for key,element in pairs(elements) do
-    term.setCursorPos(x, y + posY)
+    out.setCursorPos(x, y + posY)
     
     if (isMultiselect) then
       if (selectedItems[listID][key] == true) then
-        term.setBackgroundColor(listSelectedColor)
+        out.setBackgroundColor(listSelectedColor)
       else
-        term.setBackgroundColor(listDefaultColor)
+        out.setBackgroundColor(listDefaultColor)
       end
     else
       if (selectedItems[listID] == key) then
-        term.setBackgroundColor(listSelectedColor)
+        out.setBackgroundColor(listSelectedColor)
       else
-        term.setBackgroundColor(listDefaultColor)
+        out.setBackgroundColor(listDefaultColor)
       end
     end
     
-    term.write(" " .. element .. " ")
+    out.write(" " .. element .. " ")
     posY = posY + 1
   end
   
-  term.setBackgroundColor(colors.black)
+  out.setBackgroundColor(colors.black)
 end
 
 -- Displays a list and returns the field that the
@@ -518,7 +554,7 @@ function showSelector(x, y, elements)
     end
   end
   
-  term.setBackgroundColor(colors.black)
+  out.setBackgroundColor(colors.black)
   
   -- Read the user input.
   scroll = 1
@@ -530,20 +566,20 @@ function showSelector(x, y, elements)
     -- Display the actual selector.
     showBox(x, y, width, height, listDefaultColor)
     
-    term.setBackgroundColor(listDefaultColor)
+    out.setBackgroundColor(listDefaultColor)
     middle = math.floor(width / 2)
-    term.setCursorPos(x + middle, y)
-    term.write("^")
-    term.setCursorPos(x + middle, bottom)
-    term.write("V")
+    out.setCursorPos(x + middle, y)
+    out.write("^")
+    out.setCursorPos(x + middle, bottom)
+    out.write("V")
     
     for i = 1, displayCount do
-      term.setCursorPos(x, y + i)
-      term.write(" " .. elements[i + scroll - 1] .. " ")
+      out.setCursorPos(x, y + i)
+      out.write(" " .. elements[i + scroll - 1] .. " ")
     end
-    term.setBackgroundColor(colors.black)
+    out.setBackgroundColor(colors.black)
     
-    _, _, touchX, touchY = os.pullEvent("monitor_touch")
+    touchX, touchY, mouseButton = getCursorInput()
     
     if (touchX < x or touchX > right or touchY < y or touchY > bottom) then
       selectedItem = nil
@@ -574,10 +610,10 @@ end
 
 -- Displays the text with red background colour.
 function showSimpleButton(x, y, text)
-  term.setCursorPos(x, y)
-  term.setBackgroundColor(colors.red)
-  term.write(text)
-  term.setBackgroundColor(colors.black)
+  out.setCursorPos(x, y)
+  out.setBackgroundColor(colors.red)
+  out.write(text)
+  out.setBackgroundColor(colors.black)
 end
 
 -- Displays the "Back"- and "Refresh"-Buttons
@@ -610,8 +646,8 @@ function loadObjects()
     
     if (objectType == "Variable") then
       value = getVariableValue(object)
-      term.setCursorPos(x, y)
-      term.write(value)
+      out.setCursorPos(x, y)
+      out.write(value)
     elseif (objectType == "Slider") then
       length = object.length
       value = getSliderValue(object)
@@ -622,7 +658,7 @@ end
 
 -- Displays all objects of the selected screen.
 function showScreen(screenID)
-  term.clear()
+  out.clear()
   
   currentScreen = screenID
   
@@ -669,15 +705,15 @@ function showScreen(screenID)
   
   showDefaultButtons()
   
-  term.setCursorPos(1, maxY)
+  out.setCursorPos(1, maxY)
 end
 
 -- Waits until the user touches the monitor and
 -- if he touched a button, the function stored in
 -- it will be called.
 function getInput()
-  finished = false
-  _, _, x, y = os.pullEvent("monitor_touch")
+  local finished = false
+  x, y, mouseButton = getCursorInput()
   
   if (y == maxY) then -- Checking the default buttons
     if (x <= string.len(backText)) then -- "Back"-Button pressed
@@ -790,20 +826,35 @@ function callAddOn(object, callType)
 end
 
 -- Checks if the monitor on monitorSide exists and wraps it into "monitor".
-function getMonitor()
-  if (peripheral.getType(monitorSide) == "monitor") then
-    monitor = peripheral.wrap(monitorSide)
-    return true
+function getOutput()
+  if (monitor == nil) then
+    local monitorFound = false
+    for _, side in pairs(sides) do
+      if (peripheral.getType(side) == "monitor") then
+        monitor = peripheral.wrap(side)
+        monitorFound = true
+        out = monitor
+        outIsTerm = false
+      end
+    end
+    
+    if not monitorFound then
+      out = term
+      outIsTerm = true
+    end
   else
-    return false
+    out = monitor
+    outIsTerm = false
   end
 end
 
 -- Shows the message on the computer for debugging. Probably my most-used function.
 function debugMessage(message)
-  term.restore()
+  if outIsTerm then
+    error("Can't display a debug message on a computer!")
+  end
+  
   print(message)
-  term.redirect(monitor)
 end
 
 -- Calls the "getInput" function until the user presses the quit-button.
@@ -848,9 +899,11 @@ end
 -- screen editor region start --
 
 function generateScreenList()
-  ret = {  }
+  ret = { "mainScreen" }
   for key, value in pairs(screens) do
-    table.insert(ret, key)
+    if (key ~= "mainScreen" and key ~= "defaultX" and key ~= "defaultY") then
+      table.insert(ret, key)
+    end
   end
   
   return ret
@@ -901,11 +954,11 @@ function editorFunctions.setParent()
   height = list.height
   for i = 1, height do
     if (selectedItems.screenList ~= i) then
-      paintutils.drawPixel(1, i + 1, colors.lime)
+      drawPixel(1, i + 1, colors.lime)
     end
   end
   
-  event, side, x, y = os.pullEvent("monitor_touch")
+  x, y, mouseButton = getCursorInput()
   
   if (y > 1 and y <= height + 1) then -- Clicked inside the list.
     if (y - 1 ~= selectedItems.screenList) then -- Selected parentScreen is not selected screen.
@@ -914,15 +967,20 @@ function editorFunctions.setParent()
   end
   
   for i = 1, height do
-    paintutils.drawPixel(1, i + 1, colors.black)
+    drawPixel(1, i + 1, colors.black)
   end
 end
 
 -- Creates a new screen. The user has to enter the screen name in the computer.
 function editorFunctions.newScreen()
-  term.clear()
-  term.setCursorPos(2, 2)
-  term.write("Enter a screen-name.")
+  out.clear()
+  if not outIsTerm then
+    out.setCursorPos(2, 2)
+    out.write("Enter a screen-name.")
+  end
+  
+  out.setCursorPos(1, 1)
+  
   message = "Pleas enter the name of the new screen."
   userInput = readUserInput(message, false)
   
@@ -966,6 +1024,8 @@ function showDefaultObject(objectType, xCoord, yCoord)
   object.objType = objectType
   object.x = xCoord
   object.y = yCoord
+  object.xPercent = maxX / xCoord
+  object.yPercent = maxX / yCoord
   
   maxWidth = maxX - xCoord
   maxHeight = maxY - yCoord
@@ -991,6 +1051,8 @@ function showDefaultObject(objectType, xCoord, yCoord)
     if (objectType == "Button") then
       object.width = (defaultWidth <= maxWidth) and defaultWidth or maxWidth
       object.height = (defaultHeight <= maxHeight) and defaultHeight or maxHeight
+      object.widthPercent = maxX / object.width
+      object.heightPercent = maxY / object.height
       object.text = objectValues.text
       object.horizontalAlignment = "left"
       object.verticalAlignment = "top"
@@ -1014,9 +1076,11 @@ function showDefaultObject(objectType, xCoord, yCoord)
       object.elements = objectValues.elements
       showList(object)
     end
-  elseif (objectType == "Button") then
+  elseif (objectType == "Button") then -- Object is not an AddOn.
     object.width = (maxWidth < buttonDefaultWidth) and maxWidth or buttonDefaultWidth
     object.height = (maxHeight < buttonDefaultHeight) and maxHeight or buttonDefaultHeight
+    object.widthPercent = maxX / object.width
+    object.heightPercent = maxY / object.height
     object.text = "Button"
     object.funcType = ""
     object.param = ""
@@ -1030,6 +1094,7 @@ function showDefaultObject(objectType, xCoord, yCoord)
     object.varID = "testVariable"
   elseif (objectType == "Slider") then
     object.length = (maxWidth < sliderDefaultLength) and maxWidth or sliderDefaultLength
+    object.lengthPercent = maxX / object.length
     object.direction = "right"
     object.sliderID = "testSlider"
     showSlider(object)
@@ -1065,30 +1130,30 @@ function showAlignmentLines(object, left, top, right, bottom, color)
   verticalAlignment = object.verticalAlignment
   
   if (horizontalAlignment == "left" or horizontalAlignment == "stretch") then -- left
-    paintutils.drawPixel(1, top, editorAlignmentTrueColor)
+    drawPixel(1, top, editorAlignmentTrueColor)
   else
-    paintutils.drawPixel(1, top, editorAlignmentFalseColor)
+    drawPixel(1, top, editorAlignmentFalseColor)
   end
   
   if (horizontalAlignment == "right" or horizontalAlignment == "stretch") then -- right
-    paintutils.drawPixel(maxX, top, editorAlignmentTrueColor)
+    drawPixel(maxX, top, editorAlignmentTrueColor)
   else
-    paintutils.drawPixel(maxX, top, editorAlignmentFalseColor)
+    drawPixel(maxX, top, editorAlignmentFalseColor)
   end
   
   if (verticalAlignment == "top" or verticalAlignment == "stretch") then -- top
-    paintutils.drawPixel(left, 1, editorAlignmentTrueColor)
+    drawPixel(left, 1, editorAlignmentTrueColor)
   else
-    paintutils.drawPixel(left, 1, editorAlignmentFalseColor)
+    drawPixel(left, 1, editorAlignmentFalseColor)
   end
   
   if (verticalAlignment == "bottom" or verticalAlignment == "stretch") then -- bottom
-    paintutils.drawPixel(left, maxY, editorAlignmentTrueColor)
+    drawPixel(left, maxY, editorAlignmentTrueColor)
   else
-    paintutils.drawPixel(left, maxY, editorAlignmentFalseColor)
+    drawPixel(left, maxY, editorAlignmentFalseColor)
   end
   
-  term.setBackgroundColor(colors.black)
+  out.setBackgroundColor(colors.black)
 end
 
 -- Returns the values of horizontalAlignment and
@@ -1210,35 +1275,49 @@ function editObject(objectKey)
     
     index = 1
     for key, value in pairs(sObject) do
-      if (key ~= "objType" and key ~= "x" and key ~= "y" and key ~= "width" and key ~= "height" and key ~= "length" and key ~= "direction") then
+      if (key ~= "objType" 
+      and key ~= "x" 
+      and key ~= "y" 
+      and key ~= "width" 
+      and key ~= "height" 
+      and key ~= "length" 
+      and key ~= "direction" 
+      and key ~= "xPercent" 
+      and key ~= "yPercent"
+      and key ~= "widthPercent"
+      and key ~= "heightPercent"
+      and key ~= "horizontalAlignment"
+      and key ~= "verticalAlignment") then
         table.insert(objAttr, index, key)
         index = index + 1
       end
     end
     
-    term.clear()
+    out.clear()
     
     yPos = 2
     top = yPos
     for attrKey, attrValue in ipairs(objAttr) do
-      term.setCursorPos(2, yPos)
-      term.write(attrValue .. ": ")
-      print(sObject[attrValue])
+      out.setCursorPos(2, yPos)
+      out.write(attrValue .. ": ")
+      out.write(sObject[attrValue])
       yPos = yPos + 1
     end
-    term.setCursorPos(2, yPos + 1)
-    term.setBackgroundColor(colors.red)
-    term.write(doneString)
-    term.setBackgroundColor(colors.black)
+    out.setCursorPos(2, yPos + 1)
+    out.setBackgroundColor(colors.red)
+    out.write(doneString)
+    out.setBackgroundColor(colors.black)
     
     bottom = yPos - 1
     finished = false
     while not finished do
-      event, side, x, y = os.pullEvent("monitor_touch")
+      x, y, mouseButton = getCursorInput()
       
       if y >= top and y <= bottom then
         selectedAttr = objAttr[y - 1]
-        paintutils.drawPixel(1, y, colors.yellow)
+        if not outIsTerm then
+          drawPixel(1, y, colors.yellow)
+        end
         
         if (selectedAttr == "text" or 
             selectedAttr == "param" or 
@@ -1249,6 +1328,15 @@ function editObject(objectKey)
             selectedAttr == "message" or
             selectedAttr == "elements" or
             selectedAttr == "message") then
+          
+          if outIsTerm then
+            out.setCursorPos(1, y)
+            out.clearLine(y)
+            out.setCursorPos(2, y)
+            out.write(selectedAttr .. ": ")
+            --out.setCursorPos(4 + string.len(selectedAttr), y)
+          end
+          
           userInput = readUserInput("Please enter a value for the " .. selectedAttr .. ".", false)
           if (userInput ~= nil) then
             screens[currentScreen][objectKey][selectedAttr] = userInput
@@ -1266,15 +1354,15 @@ function editObject(objectKey)
             screens[currentScreen][objectKey][selectedAttr] = true
           end
         end
-        paintutils.drawPixel(1, y, colors.black)
+        drawPixel(1, y, colors.black)
         if (not finished and selectedAttr ~= nil) then
-          term.setCursorPos(2, y) -- I don't know if that's neccessary...
+          out.setCursorPos(2, y) -- I don't know if that's neccessary...
           for i = 2, maxX do
-            term.write(" ")
+            out.write(" ")
           end
-          term.setCursorPos(2, y)
-          term.write(selectedAttr .. ": ")
-          term.write(sObject[selectedAttr])
+          out.setCursorPos(2, y)
+          out.write(selectedAttr .. ": ")
+          out.write(sObject[selectedAttr])
         end
       elseif (y == yPos + 1 and x >= 2 and x <= 1 + string.len(doneString)) then
         finished = true
@@ -1286,7 +1374,7 @@ function editObject(objectKey)
     moveY = top
     
     if (objType == "Button") then
-      paintutils.drawPixel(right, bottom, editorScaleColor) -- Draw scale-pixel.
+      drawPixel(right, bottom, editorScaleColor) -- Draw scale-pixel.
       scaleX = right
       scaleY = bottom
       canScale = true
@@ -1312,15 +1400,15 @@ function editObject(objectKey)
         scaleY = bottom
       end
       
-      paintutils.drawPixel(scaleX, scaleY, editorScaleColor) -- Draw scale-pixel.
+      drawPixel(scaleX, scaleY, editorScaleColor) -- Draw scale-pixel.
     elseif (objType == "Custom" and sObject.canScale) then -- AddOn
       canScale = true
       scaleX = right
       scaleY = bottom
-      paintutils.drawPixel(scaleX, scaleY, editorScaleColor)
+      drawPixel(scaleX, scaleY, editorScaleColor)
     end
     
-    paintutils.drawPixel(moveX, moveY, editorMoveColor)
+    drawPixel(moveX, moveY, editorMoveColor)
     showAlignmentLines(sObject, left, top, right, bottom, editorMarkerColor)
     
     horizontalAlignment = screens[currentScreen][objectKey].horizontalAlignment
@@ -1330,39 +1418,53 @@ function editObject(objectKey)
     topAlignment = (verticalAlignment == "top" or verticalAlignment == "stretch")
     bottomAlignment = (verticalAlignment == "bottom" or verticalAlignment == "stretch")
     
-    term.setBackgroundColor(colors.black)
+    out.setBackgroundColor(colors.black)
     
-    _, _, x, y = os.pullEvent("monitor_touch")
+    x, y, mouseButton = getCursorInput()
     
     if (x >= left and x <= right and y >= top and y <= bottom) then -- clicked inside the object
       if (x == moveX and y == moveY) then -- move object
-        paintutils.drawPixel(moveX, moveY, colors.white)
-        _, _, x, y = os.pullEvent("monitor_touch")
+        drawPixel(moveX, moveY, colors.white)
+        x, y, mouseButton = getCursorInput()
         screens[currentScreen][objectKey].x = x
         screens[currentScreen][objectKey].y = y
+        screens[currentScreen][objectKey].xPercent = x / maxX
+        screens[currentScreen][objectKey].yPercent = y / maxY
       elseif (canScale and x == scaleX and y == scaleY) then -- scale object
-        paintutils.drawPixel(scaleX, scaleY, colors.white)
-        term.setBackgroundColor(colors.black)
-        _, _, x, y = os.pullEvent("monitor_touch")
+        drawPixel(scaleX, scaleY, colors.white)
+        out.setBackgroundColor(colors.black)
+        x, y, mouseButton = getCursorInput()
         
         if (objType == "Button" or objType == "Custom") then
           if (x > moveX + 2 and y >= moveY) then
-            screens[currentScreen][objectKey].width = x - left + 1
-            screens[currentScreen][objectKey].height = y - top + 1
+            width = x - left + 1
+            height = y - top + 1
+            screens[currentScreen][objectKey].width = width
+            screens[currentScreen][objectKey].height = height
+            screens[currentScreen][objectKey].widthPercent = width / maxX
+            screens[currentScreen][objectKey].heightPercent = height / maxY
           end
         elseif (objType == "Slider") then
           if (x < moveX and y == moveY) then -- Clicked left of the slider.
+            length = moveX - x
             screens[currentScreen][objectKey].direction = "left"
-            screens[currentScreen][objectKey].length = moveX - x
+            screens[currentScreen][objectKey].length = length
+            screens[currentScreen][objectKey].lengthPercent = length / maxX
           elseif (x == moveX and y < moveY) then -- Clicked above the slider.
+            length = moveY - y
             screens[currentScreen][objectKey].direction = "up"
-            screens[currentScreen][objectKey].length = moveY - y
+            screens[currentScreen][objectKey].length = length
+            screens[currentScreen][objectKey].lengthPercent = length / maxY
           elseif (x > moveX and y == moveY) then -- Clicked right of the slider.
+            length = x - moveX
             screens[currentScreen][objectKey].direction = "right"
-            screens[currentScreen][objectKey].length = x - moveX
+            screens[currentScreen][objectKey].length = length
+            screens[currentScreen][objectKey].lengthPercent = length / maxX
           elseif (x == moveX and y > moveY) then -- Clicked below the slider.
+            length = y - moveY
             screens[currentScreen][objectKey].direction = "down"
-            screens[currentScreen][objectKey].length = y - moveY
+            screens[currentScreen][objectKey].length = length
+            screens[currentScreen][objectKey].lengthPercent = length / maxY
           end
         end
       else -- clicked something else inside the object (no idea what I could use this for)
@@ -1373,9 +1475,9 @@ function editObject(objectKey)
       while not finished do
         
         if (x == 1 and y == top) then -- left alignment-pixel
-          leftAlignment = not leftAlignment
+          --leftAlignment = not leftAlignment
         elseif (x == left and y == 1) then -- top alignment-pixel
-          topAlignment = not topAlignment
+          --topAlignment = not topAlignment
         elseif (x == maxX and y == top) then -- right alignment-pixel
           rightAlignment = not rightAlignment
         elseif (x == left and y == maxY) then -- bottom alignment-pixel
@@ -1390,21 +1492,21 @@ function editObject(objectKey)
         
         if not finished then
           showAlignmentLines(sObject, left, top, right, bottom, editorMarkerColor)
-          _, _, x, y = os.pullEvent("monitor_touch")
+          x, y, mouseButton = getCursorInput()
         end
       end
     end
   end
   
-  term.setBackgroundColor(colors.black)
+  out.setBackgroundColor(colors.black)
   showScreen(currentScreen)
 end
 
 function markVariables()
   for sObjectID, sObject in pairs(screens[currentScreen]) do
     if (sObject.objType == "Variable") then
-      paintutils.drawPixel(sObject.x, sObject.y, colors.lime)
-      term.setBackgroundColor(colors.black)
+      drawPixel(sObject.x, sObject.y, colors.lime)
+      out.setBackgroundColor(colors.black)
     end
   end
 end
@@ -1412,7 +1514,7 @@ end
 function getEditorInput()
   if not showEditorOptions then
     markVariables()
-    _, _, xCoord, yCoord = os.pullEvent("monitor_touch")
+    xCoord, yCoord, mouseButton = getCursorInput()
   end
   
   if (showEditorOptions or yCoord == maxY and xCoord > maxX - string.len(refreshText)) then -- "Refresh" pressed => Options screen
@@ -1426,12 +1528,28 @@ function getEditorInput()
   else
     key, value = findObject(xCoord, yCoord) -- Find the object that the user touched.
     if (key == nil) then -- No object touched. Show selector for new object.
-      paintutils.drawPixel(xCoord, yCoord, colors.white)
+      drawPixel(xCoord, yCoord, colors.white)
       if (showSelector(xCoord, yCoord, objectTypes)) then -- something has been selected
         showDefaultObject(selectedItem, xCoord, yCoord)
       end
     else
-      editObject(key)
+      if (mouseButton == 1) then
+        editObject(key)
+      else
+        if (showSelector(xCoord, yCoord, rightClickActions)) then
+          if (selectedItem == "Attributes") then
+            lastItem = selectedItems.editActionList
+            selectedItems.editActionList = 2
+            editObject(key)
+            selectedItems.editActionList = lastItem
+          elseif (selectedItem == "Delete") then
+            lastItem = selectedItems.editActionList
+            selectedItems.editActionList = 3
+            editObject(key)
+            selectedItems.editActionList = lastItem
+          end
+        end
+      end
     end
   end
 end
@@ -1459,7 +1577,6 @@ end
 
 -- Prints the message at the screen and exits the program.
 function throwException(message, fileName, lineNumber)
-  term.restore()
   error("AddOn loader error when reading file " .. fileName .. " at line " .. lineNumber .. ": " .. message)
 end
 
@@ -1615,29 +1732,45 @@ end
 
 -- Screen size adaptation region start --
 
+function round(number)
+  assert(number)
+  comma = number % 1
+  if comma < 0.5 then
+    ret = math.floor(number)
+  else
+    ret = math.ceil(number)
+  end
+  
+  return ret
+end
+
 -- Checks the default-size of the screens
 -- table and adapts all objects to the new size if
 -- the screen-size has changed.
 function checkDefaultSize()
+  defaultX = screens["defaultX"]
+  defaultY = screens["defaultY"]
   if (screens["defaultX"] == nil or screens["defaultY"] == nil) then -- Program has been started for the first time.
     screens["defaultX"] = maxX
     screens["defaultY"] = maxY
+    saveScreens()
   elseif (screens["defaultX"] ~= maxX or screens["defaultY"] ~= maxY) then -- Screen-size is different since last program start.
-    defaultX = screens["defaultX"]
-    defaultY = screens["defaultY"]
     xDiff = maxX - defaultX
     yDiff = maxY - defaultY
-    xDiffPercent = maxX / defaultX -- unused right now... to complicated ):
-    yDiffPercent = maxY / defaultY -- same here
-    
     for screenID, screen in pairs(screens) do
       if (type(screen) == "table") then
         for objectID, object in pairs(screen) do
           if (type(object) == "table") then
+            objType = object.objType
             x = object.x
             y = object.y
+            xPercent = object.xPercent
+            yPercent = object.yPercent
+            widthPercent = object.widthPercent
+            heightPercent = object.heightPercent
             horizontalAlignment = object.horizontalAlignment
             verticalAlignment = object.verticalAlignment
+            
             if (horizontalAlignment == nil or verticalAlignment == nil) then
               horizontalAlignment = "left"
               verticalAlignment = "top"
@@ -1645,35 +1778,21 @@ function checkDefaultSize()
               screens[screenID][objectID].verticalAlignment = verticalAlignment
             end
             
-            if (horizontalAlignment == "right") then
-              screens[currentScreen][objectID].x = x + xDiff
-            elseif (horizontalAlignment == "stretch") then
-              if (object.objType == "Button") then
-                screens[currentScreen][objectID].width = object.width + xDiff
-              elseif (object.objType == "Slider") then
-                if (object.direction == "left" or object.direction == "right") then
-                  screens[currentScreen][objectID].length = object.length + xDiff
-                  
-                  if (object.direction == "left") then -- Slider has to be moved because it goes to the left.
-                    screens[currentScreen][objectID].x = object.x + xDiff
-                  end
-                end
+            if (horizontalAlignment == "stretch") then -- Stretch object horizontally.
+              screens[screenID][objectID].x = round(maxX * xPercent)
+              if (objType == "Button") then
+                screens[screenID][objectID].width = round(maxX * widthPercent)
+              elseif (objType == "Slider" and (direction == "left" or direction == "right")) then
+                screens[screenID][objectID].length = round(maxX * object.lengthPercent)
               end
             end
             
-            if (verticalAlignment == "bottom") then
-              screens[currentScreen][objectID].y = y + yDiff
-            elseif (verticalAlignment == "stretch") then
-              if (object.objType == "Button") then
-                screens[currentScreen][objectID].height = object.height + yDiff
-              elseif (object.objType == "Slider") then
-                if (object.direction == "up" or object.direction == "down") then
-                  screens[currentScreen][objectID].length = object.length + yDiff
-                  
-                  if (object.direction == "up") then -- Slider has to be moved because it goes to the left.
-                    screens[currentScreen][objectID].y = object.y + yDiff
-                  end
-                end
+            if (verticalAlignment == "stretch") then
+              screens[screenID][objectID].y = round(maxY * yPercent)
+              if (objType == "Button") then
+                screens[screenID][objectID].height = round(maxY * heightPercent)
+              elseif (objType == "Slider" and (direction == "up" or direction == "down")) then
+                screens[screenID][objectID].length = round(maxX * object.lengthPercent)
               end
             end
           end
@@ -1683,13 +1802,13 @@ function checkDefaultSize()
     
     screens.defaultX = maxX
     screens.defaultY = maxy
+    saveScreens()
   end
 end
 
 -- Screen size adaptation region end --
 
 function printInfo()
-  term.restore()
   print()
   print(version)
   print("Author: Encreedem")
@@ -1699,25 +1818,20 @@ function printInfo()
   print("edit - Starts the program in edit-mode.")
   print()
   print("Visit the CC-forums or my YouTube channel (LPF1337) for news and help.")
-  term.redirect(monitor)
 end
 
 -- initialization
 
 function init()
-  if not getMonitor() then
-    print("No monitor at " .. monitorSide .. " side!");
-    return false
-  end
+  getOutput()
   
-  maxX, maxY = monitor.getSize()
+  maxX, maxY = out.getSize()
   if (maxX < 16 or maxY < 10) then -- smaller than 2x2
     print("Screen too small! You need at least 2x2 monitors!")
     return false
   end
   
   loadAddOns()
-  term.redirect(monitor)
   
   return true
 end
@@ -1739,14 +1853,13 @@ end
 
 if init() then
   loadScreens()
-  checkDefaultSize()
+  --checkDefaultSize()
   checkArgs()
   
   if editMode then
     saveScreens()
   end
   
-  term.clear()
-  term.setCursorPos(1, 1)
-  term.restore()
+  out.clear()
+  out.setCursorPos(1, 1)
 end
