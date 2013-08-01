@@ -1,10 +1,10 @@
-local version = "Graffiti v1.4"
+local version = "Graffiti v1.5"
 
 -- fields for users
-local userFunctions = {}
-local userLists = {}
-local selectedItems = {}
-local userInputs = {}
+userFunctions = {}
+userLists = {}
+selectedItems = {}
+userInputs = {}
 
 --monitor
 local monitorSide = ""
@@ -22,6 +22,7 @@ local sliderLowValueColor = colors.red
 local sliderMediumValueColor = colors.yellow
 local sliderHighValueColor = colors.lime
 local inputDefaultColor = colors.white
+local inputDefaultTextColor = colors.black
 local inputPressedColor = colors.yellow
 local listDefaultColor = colors.lightBlue
 local listSelectedColor = colors.orange
@@ -38,6 +39,12 @@ local sliderDefaultLength = 10
 
 -- save file
 saveFileName = "Graffiti.sav"
+
+-- API
+initDone = false
+isAPI = false -- Determines whether the program has been loaded as an API
+variableValues = {}
+sliderValues = {}
 
 -- editor options
 local editMode = false
@@ -57,12 +64,12 @@ local args = { ... }
 local quit = false
 local maxX, maxY = 51, 19
 local out = term -- Output: either "term" or the monitor
-local outIsTerm = true
+local outIsTerm = false
 local autoLoadObjects = true
 local changeButtonColor = true
 local screens = {}
 screens.mainScreen = {}
-local currentScreen = "mainScreen"
+currentScreen = "mainScreen"
 local sides = { "left", "top", "right", "bottom", "front", "back" }
 
 -- Displays a star in the upper left corner for a
@@ -97,34 +104,33 @@ userLists.testList = {
 }
 
 -- Define the value of a variable-object.
-function getVariableValue(variable)
-  if (variable == nil or variable.objType ~= "Variable") then
-    return
+function getVariableValue(variableID)
+  if (variableID == nil) then
+    return ""
   end
   
-  variableID = variable.varID
   if (variableID == "testVariable") then
     return "Variable";
   elseif (variableID == "Time") then
     return textutils.formatTime(os.time(), true)
+  else
+    return variableValues[variableID]
   end
-  
-  return ""
 end
 
 -- Definie the value of a slider-object
 -- 0: empty; 100: full
-function getSliderValue(slider)
-  if (slider == nil or slider.objType ~= "Slider") then
-    return
+function getSliderValue(sliderID)
+  if (sliderID == nil or sliderID == "") then
+    return 0
   end
-  
-  sliderID = slider.sliderID
   
   if (sliderID == "testSlider") then
     return 87;
   elseif (sliderID == "randomSlider") then
     return randomValue
+  else
+    return sliderValues(sliderID)
   end
 end
 
@@ -132,6 +138,20 @@ end
 -- shouldn't be edited! If you do so and the program
 -- doesn't work any more then it's your fault!
 
+-- API function: Sets the value of all variables
+-- with the given ID.
+function setVariableValue(variableID, newVar)
+  variableValues[variableID] = newVar
+end
+
+-- API function: Sets the value of all sliders
+-- with the given ID.
+function setSliderValue(sliderID, newVar)
+  sliderValues[sliderID] = newVar
+end
+
+-- Returns where the user clicked and which button
+-- he pressed (always 1 if it's a monitor).
 function getCursorInput()
   local finished = false
   
@@ -173,14 +193,14 @@ function getUserInput(inputObject)
     return
   end
   
-  x = inputObject.x
-  y = inputObject.y
-  inputID = inputObject.inputID
-  message = inputObject.message
-  isPassword = (inputObject.isPassword == nil) and false or inputObject.isPassword
-  maxLength = inputObject.maxLength
+  local x = inputObject.x
+  local y = inputObject.y
+  local inputID = inputObject.inputID
+  local message = inputObject.message
+  local isPassword = (inputObject.isPassword == nil) and false or inputObject.isPassword
+  local maxLength = inputObject.maxLength
+  local existingInput = userInputs[inputID]
   
-  existingInput = userInputs[inputID]
   out.setBackgroundColor(colors.black)
   out.setCursorPos(x, y)
   if (existingInput ~= nil) then -- Clear the text on the input object.
@@ -204,7 +224,7 @@ function getUserInput(inputObject)
     out.setCursorPos(x + 1, y)
   end
   
-  userInput = readUserInput(message, isPassword)
+  local userInput = readUserInput(message, isPassword)
   if (userInput ~= nil) then
     userInputs[inputID] = userInput
   end
@@ -246,6 +266,7 @@ end
 
 -- display objects region start --
 
+-- Has to be used instead of paintutils.drawpixel
 function drawPixel(x, y, color)
   out.setCursorPos(x, y)
   out.setBackgroundColor(color)
@@ -253,6 +274,8 @@ function drawPixel(x, y, color)
 end
 
 -- Displays a line at the given coordinates.
+-- Didn't know that paintutils has a function that
+-- does that for me...
 function showLine(x, y, direction, length, color)
   out.setBackgroundColor(color)
   
@@ -391,18 +414,18 @@ function showInput(inputObject)
     return
   end
   
-  inputId = inputObject.inputID
-  x = inputObject.x
-  y = inputObject.y
+  local inputID = inputObject.inputID
+  local x = inputObject.x
+  local y = inputObject.y
   
   out.setCursorPos(x, y)
   out.setBackgroundColor(inputDefaultColor)
+  out.setTextColor(inputDefaultTextColor)
   out.write(" ")
-  if (userInputs[inputID] ~= nil) then
-    out.write(userInputs[inputID])
-  end
+  out.write(userInputs[inputID])
   out.write(" ")
   
+  out.setTextColor(colors.white)
   out.setBackgroundColor(colors.black)
 end
 
@@ -626,6 +649,7 @@ end
 
 -- display objects region end
 
+-- Returns a table with most informations that an AddOn would need.
 function getSystemInfo()
   systemInfo = {}
   systemInfo.maxX = maxX
@@ -640,17 +664,17 @@ end
 -- of the current screen.
 function loadObjects()
   for objectID, object in pairs(screens[currentScreen]) do
-    objectType = object.objType
-    x = object.x
-    y = object.y
+    local objectType = object.objType
+    local x = object.x
+    local y = object.y
     
     if (objectType == "Variable") then
-      value = getVariableValue(object)
+      local value = getVariableValue(object.varID)
       out.setCursorPos(x, y)
       out.write(value)
     elseif (objectType == "Slider") then
-      length = object.length
-      value = getSliderValue(object)
+      local length = object.length
+      local value = getSliderValue(object.sliderID)
       showSlider(object, value)
     end
   end
@@ -660,6 +684,7 @@ end
 function showScreen(screenID)
   out.clear()
   
+  assert(screenID, "Can't show screen! Parameter screenID is invalid!")
   currentScreen = screenID
   
   if not editMode then
@@ -734,8 +759,10 @@ function getInput()
     end
   end
   
-  if (finished == true or quit==true) then
-    return nil
+  if finished then
+    return nil, currentScreen
+  elseif quit then
+    return "quit", currentScreen -- Used for the API
   end
   
   sObjectID, sObject = findObject(x, y)
@@ -743,7 +770,9 @@ function getInput()
     objectType = sObject.objType
     
     if (objectType == "Button") then
-      if (sObject.isAddon) then
+      if isAPI and sObject.funcType == "function" then
+        return sObject.param, currentScreen
+      elseif (sObject.isAddon) then
         callAddOn(sObject, "Click")
       elseif (sObject.funcType ~= nil and sObject.param ~= nil) then
         callAction(sObject)
@@ -827,7 +856,7 @@ end
 
 -- Checks if the monitor on monitorSide exists and wraps it into "monitor".
 function getOutput()
-  if (monitor == nil) then
+  if (monitor == nil and outIsTerm == false) then
     local monitorFound = false
     for _, side in pairs(sides) do
       if (peripheral.getType(side) == "monitor") then
@@ -842,9 +871,10 @@ function getOutput()
       out = term
       outIsTerm = true
     end
+  elseif outIsTerm then
+    out = term
   else
     out = monitor
-    outIsTerm = false
   end
 end
 
@@ -1070,6 +1100,7 @@ function showDefaultObject(objectType, xCoord, yCoord)
     elseif (objectType == "Input") then
       object.inputID = objectID
       object.message = objectValues.message
+      object.isPassword = objectValues.isPassword or false
       showInput(object)
     elseif (objectType == "List") then
       object.listID = objectID
@@ -1577,7 +1608,7 @@ end
 
 -- Prints the message at the screen and exits the program.
 function throwException(message, fileName, lineNumber)
-  error("AddOn loader error when reading file " .. fileName .. " at line " .. lineNumber .. ": " .. message)
+  error("AddOn loader error when reading file " .. fileName .. " at line " .. lineNumber .. ":\n" .. message)
 end
 
 -- Sets the optional attributes to their default-values if they haven't been set.
@@ -1712,7 +1743,8 @@ end
 
 -- Looks for AddOn files and adds them to the addOns-table.
 function loadAddOns()
-  files = fs.list(shell.dir())
+  local currentDir = shell.dir()
+  local files = fs.list(currentDir)
   for key, file in pairs(files) do
     if not fs.isDir(file) then -- if "file" is an actual file
       if string.sub(file, -4) == addOnExtension then -- if the file is a valid AddOn-file
@@ -1831,8 +1863,9 @@ function init()
     return false
   end
   
-  loadAddOns()
+  isAPI = (shell == nil)
   
+  initDone = true
   return true
 end
 
@@ -1845,6 +1878,8 @@ function checkArgs()
     elseif (args[1] == "info") then
       printInfo()
       return
+    elseif (args[1] == "term") then
+      outIsTerm = true
     end
   end
   
@@ -1852,14 +1887,20 @@ function checkArgs()
 end
 
 if init() then
-  loadScreens()
-  --checkDefaultSize()
-  checkArgs()
-  
-  if editMode then
-    saveScreens()
+  if isAPI then
+    loadScreens()
+    --checkDefaultSize()
+  else
+    loadAddOns()
+    loadScreens()
+    --checkDefaultSize()
+    checkArgs()
+    
+    if editMode then
+      saveScreens()
+    end
+    
+    out.clear()
+    out.setCursorPos(1, 1)
   end
-  
-  out.clear()
-  out.setCursorPos(1, 1)
 end
