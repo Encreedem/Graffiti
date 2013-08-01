@@ -1,0 +1,1390 @@
+-- used programs:
+-- GHOSTY 0.9.5
+-- Graffiti v1.3
+-- Graffiti API v1.0
+
+--- ******************************
+--- ** Protocol command reference
+--- 
+---
+---   *****************
+---   ** Command syntax
+---
+---   <command><image-name>...
+---   NOTE: The client command RAWxx does not follow this syntax, since it doesn't use an image-name header.
+---
+---
+---   ************************************
+---   ** Transfer commands (client/server)
+---
+---   PRG - Purges all files from client.
+---   MDR - A mkdir command. Additional headers: <directory name>.
+---   FIL - A file transfer notification. Actual file contents are transfered in a separate RAW message. Additional headers: <filename><transfer ID>
+---   RAWxx - A raw file. xx = transfer ID. Note that there are no image headers, and the file contents are included at the end of the message payload.
+---   FIN - Marks the end of file transfering. No more file transfer commands will be accepted.
+---
+---
+---   ******************
+---   ** Server Commands
+---
+---   CVR - Request server compatibility version.
+---   UPD - Request a full file system update of a given image. Additional headers: <client-version>
+---   PSH - Request to push an image to the server. Additional headers: <client-version>
+---
+---   ******************
+---   ** Client Commands
+---
+---   CVR - Compatibility version response. Additional headers: <version>
+---   NAM - Notification of server's name. Additional headers: <server-name>
+---   POK - Push is accepted by server. Transfering can begin.
+---   PNK - Push is rejected by server.
+
+
+-- The GHOSTY version.
+local version = "0.9.5"
+
+-- The GHOSTY compatibility version. This is the lowest version of GHOSTY that'll still work with the current version.
+local compatibility = "0.9.0"
+
+-- The image file version.
+local fileVersion = "1.0.0"
+
+-- The image file compatibility version. This is the lowest version of file that'll still work with the current version.
+local fileCompatibility = "1.0.0"
+
+-- The default channel to transmit on.
+local channel = 7654
+
+-- The different sides to look for the modem.
+local sides = {"left", "right", "top", "bottom", "back", "front"}
+
+-- Files/directories to ignore when imaging.
+local ignoreFiles = {"/rom", "/disk", "/disk2", "/disk3", "/disk4", "/disk5", "/disk6"}
+
+-- The default images directory.
+local imagesDir = "/images"
+
+-- The client timeout when requesting an image.
+local clientTimeout = 60.0
+
+
+local modem
+local isClient = true
+local running = false
+local tIDCount = 1
+local hasPurged = false
+local lastFile = ""
+local transferID = ""
+local fileCount = 0
+local dirCount = 0
+local conflictedFileCount = 0
+local timedOut = false
+local curImage = ""
+local screenState = "main"
+local dialogYes = false
+local autoAccept = false
+local serverName = ""
+local keepFiles = false
+local locked = false
+local args = {...}
+local keys = {
+	f6=64,
+	enter=28,
+	upArrow=200,
+	downArrow=208,
+	leftArrow=203,
+    rightArrow=205
+}
+local banner = {
+"GHOSTY",
+"                       _---_     ",
+"                      / o o .    ",
+"                    /        .   ",
+"                    /        .   ",
+"                     /      .    "
+}
+
+local helpTopics = {
+
+	--{{topic, topic, topic}, {display other topic, display other topic}, "pre-text\n"
+	-- "topic text\n"
+	
+	--                                end line here --> \n
+	{{"i"}, {}, "",
+	 "-i:<image>       Requests an image from server. If\n"..
+	 "                 found, the image is installed.\n"
+	},
+	{{"update"}, {}, "",
+	 "-update:<image>  Updates server's image with this\n"..
+	 "                 client's hard disk.\n"
+	},
+	{{"s"}, {}, "",
+	 "-s               Hosts a GHOSTY server.\n"
+	},
+	{{"images"}, {}, "",
+	 "-images:<dir>    Sets the root images directory\n"..
+	 "                 for the server.\n"
+	},
+	{{"a", "auto-accept", "accept"}, {}, "",
+	 "-a               Auto-accept images from clients.\n"
+	},
+	{{"channel", "chan"}, {}, "",
+	 "-channel:<#>     Sets the modem channel.\n"
+	},
+	{{"mkimage", "makeimage", "make-image"}, {}, "",
+	 "-mkimage:<file>  Creates an image file of the hard\n"..
+	 "                 disk.\n"
+	},
+	{{"ifile","imagefile","image-file","i-file"}, {}, "",
+	 "-ifile:<file>    Installs an image from a file.\n"
+	},
+	{{"name"}, {}, "",
+	 "-name:<name>     Displays a name on the server.\n"
+	},
+	{{"nopurge", "no-purge"}, {}, "",
+	 "-nopurge         Keeps current files on disk.\n"..
+	 "                 Image files replace disk files.\n"
+	},
+	{{"purgesys", "purge-sys", "purge"}, {}, "",
+	 "-purgesys        Purges all files on the local\n"..
+	 "                 hard disk.\n"
+	},
+	{{"pbupdate", "pb-update", "pbupload", "pb-upload", "pastebinupdate", "pastebin-update", "pastebinupload", "pastebin-upload"}, {}, "",
+	 "-pbupdate        Uploads hard disk's image to\n"..
+	 "                 Pastebin.\n"
+	},
+	{{"ipb", "i-pb", "imagepb", "image-pb", "imagepastebin", "image-pastebin", "ipastebin", "i-pastebin"}, {}, "",
+	 "-ipb:<code>      Installs image from Pastebin.\n"
+	},
+	{{"?", "help"}, {}, "",
+	 "-?:<topic>       Displays a help topic.\n"
+	},
+	{{"image-make"}, {"update", "mkimage", "pbupdate"}, "Imaging arguments:\n",
+	 ""
+	},
+	{{"image-install"}, {"i", "ifile", "ipb", "nopurge"}, "Image installation arguments:\n",
+	 ""
+	},
+	{{"server"}, {"s", "name", "images", "a", "channel"}, "Server arguments:\n",
+	 ""
+	},
+	{{"other"}, {"purgesys"}, "Other arguments:\n",
+	 ""
+	},
+	{{""}, {"i", "update", "s", "a", "?"}, "Basic arguments:\n",
+	 "Help topics: image-make, image-install, server, other\n"
+	--                                end line here --> \n
+	}
+	
+	}
+
+--NOTE: Had to encode pastebin's address to prevent their spam filter from preventing uploads.
+--      This function shifts the byte values of each character back down one.
+function decodeStr(str) rtn=""; for i = 1,string.len(str),1 do rtn = rtn..string.char(string.byte(string.sub(str,i,i)) + 1) end; return rtn end
+local pastebinUploadAddress = decodeStr("gsso9..o`rsdahm-bnl.`oh.`oh^onrs-ogo")
+local pastebinDownloadAddress = decodeStr("gsso9..o`rsdahm-bnl.q`v-ogo")
+
+
+
+--Draws the GUI to the terminal screen.
+function drawGUI()
+    --always draw the banner
+    term.clear()
+    for i,v in ipairs(banner) do
+        term.setCursorPos(1,i)
+        term.write(v)
+    end
+
+	local line = #banner + 2
+	
+	-- version
+	term.setCursorPos(1,1)
+	termWriteRight("v"..version)
+	
+	-- server name
+	if serverName ~= "" then
+		term.setCursorPos(52 - string.len("Server: "..serverName), 18)
+		term.write("Server: "..serverName)
+	end
+	
+	-- channel
+	term.setCursorPos(52 - string.len("Channel: "..channel), 19)
+	term.write("Channel: "..channel)
+	
+	-- exit
+    --line = line + 4
+    term.setCursorPos(1,19)
+    term.write("[F6] Quit")
+	
+	if screenState == "main" then
+		line = drawMainScreen(line)
+	elseif screenState == "push" then
+		line = drawPushDialog(line)
+	elseif screenState == "pushWait" then
+		line = drawPushWait(line)
+	end
+    
+end
+
+
+function drawPushWait(line)
+	line = line + 2
+	term.setCursorPos(1,line)
+	term.write ("  Updating image "..curImage.."...")
+	term.setCursorBlink(true)
+	return line
+end
+
+
+function drawPushDialog(line)
+	line = line + 1
+	term.setCursorPos(1,line)
+	term.write("  Client request to update image: "..curImage)
+	line = line + 2
+	term.setCursorPos(1,line) 
+	if dialogYes then
+		term.write ("  Accept?   [YES]   no")
+	else
+		term.write ("  Accept?    yes   [NO]")
+	end
+	term.setCursorBlink(false)
+	return line
+end
+
+
+function drawMainScreen(line)
+	
+	-- images list
+	line = line + 2
+	term.setCursorPos(1,line)
+	termWriteCenter("Images")
+	local lst = fs.list(imagesDir)
+	local timglst = ""
+	for i,fil in ipairs(lst) do
+		if fs.isDir(imagesDir.."/"..fil) then
+			if timglst ~= "" then
+				timglst = timglst.."  "
+			end
+			timglst = timglst..fil
+		end
+	end
+	line = line + 2
+	term.setCursorPos(1, line)
+	termWriteCenter(timglst)
+	
+	term.setCursorBlink(false)
+	return line
+end
+
+-- Added by Encreedem: includes the Graffiti API
+function clientGui()
+  os.loadAPI("Graffiti")
+  Graffiti.userInputs["image"] = curImage
+  Graffiti.userInputs["channel"] = tostring(channel)
+  Graffiti.setVariableValue("version", version)
+  
+  local input
+  local currentScreen = "mainScreen"
+  local running = true
+  while running do
+    Graffiti.showScreen(currentScreen)
+    
+    input, screen = Graffiti.getInput()
+    currentScreen = screen or currentScreen
+    channelInput = tonumber(Graffiti.userInputs["channel"])
+    keepFileOption = Graffiti.selectedItems["keepFiles"]
+    pastebinCode = Graffiti.userInputs["pastebinCode"]
+    if (channelInput ~= nil and channelInput >= 1 and channelInput <= 65535 and channelInput ~= channel) then
+      changeChannel(channelInput)
+    end
+    
+    if (keepFileOption ~= nil) then
+      keepFiles = (keepFileOptions == 1) -- 1 = keep files, 2 or nil = don't keep files
+    else
+      keepFiles = false
+    end
+    
+    curImage = Graffiti.userInputs["image"]
+    
+    if (input == "quit") then
+      term.clear()
+      term.setCursorPos(1, 1)
+      running = false
+    elseif (input == "makeImage") then
+      term.clear()
+      term.setCursorPos(1, 1)
+      local fildat = makeGhostyFileDataFromDisk("GHOSTY_image")
+      local fh = io.open(curImage,"w")
+      fh:write(fildat)
+      fh:close()
+      print ("Image created as file "..curImage)
+    elseif (input == "getImage" or input == "updateImage") then
+      term.clear()
+      term.setCursorPos(1, 1)
+      print("GHOSTY v"..version.." client")
+      print("Image: "..curImage)
+      if input == "updateImage" then
+        print("Requesting to update image on channel "..channel.."...")
+        sendPushRequest(curImage)
+      else
+        print("Requesting image on channel "..channel.."...")
+        requestCompatibilityVersion(curImage)
+      end
+      
+      parallel.waitForAny(waitForTimeout, modemListen)
+      if timedOut then
+        print ("Timed out waiting for server.")
+      end
+    elseif (input == "pastebinGet") then
+      term.clear()
+      term.setCursorPos(1, 1)
+      installImageFromPastebin(pastebinCode)
+    elseif (input == "pastebinPut") then
+      term.clear()
+      term.setCursorPos(1, 1)
+      uploadDiskToPastebin(curImage)
+    elseif (input == "purgeSystem") then
+      term.clear()
+      term.setCursorPos(1, 1)
+      purgeSystem("/")
+      print ("File system purged.")
+    end
+  end
+  
+  os.unloadAPI("Graffiti")
+end
+
+function serverGui()
+  --Graffiti.setVariableValue("serverName", serverName)
+  --Graffiti.setVariableValue("channel", channel)
+  --Graffiti.setVariableValue("version", version)
+  
+  --while running do
+  --  Graffiti.showScreen("mainScreen")
+  --  input = Graffiti.getInput()
+  --
+  --  if (input == "quit") then
+  --    running = false
+  --  end
+  --end
+  
+  drawGUI()
+  while running do
+    local evt, p1, p2, p3, p4 = os.pullEvent()
+    if evt == "key" then
+    
+      if screenState == "main" then
+        if p1 == keys["f6"] and not locked then
+          term.clear()
+          term.setCursorPos(1,1)
+          return true
+        end
+      elseif screenState == "push" then
+        if (p1 == keys["leftArrow"] or p1 == keys["rightArrow"]) and not locked then
+          dialogYes = not dialogYes
+        end
+        if p1 == keys["enter"] and not locked then
+          if dialogYes then
+            acceptPushRequest(curImage)
+            screenState = "pushWait"
+          else
+            declinePushRequest(curImage)
+            screenState = "main"
+          end
+        end
+      end
+    end
+    
+    drawGUI()
+  end
+end
+
+
+function termWriteCenter(msg)
+	local center = (52 - string.len(msg)) / 2
+	local oldX, oldY = term.getCursorPos()
+	term.setCursorPos(center, oldY)
+	term.write(msg)
+end
+
+
+function termWriteRight(msg)
+	local right = 52 - string.len(msg)
+	local oldX, oldY = term.getCursorPos()
+	term.setCursorPos(right, oldY)
+	term.write(msg)
+end
+
+
+function changeChannel(newChan)
+	if not modem then
+		return
+	end
+	newChan = tonumber(newChan)
+	if newChan >= 1 and newChan <= 65535 then
+		modem.close(channel)
+		channel = tonumber(newChan)
+		modem.open(channel)
+	end
+end
+
+
+function modemListen()
+	
+	while running do
+		local event, modemSide, senderChannel, replyChannel, message, senderDistance = os.pullEvent("modem_message")
+		
+		-- No incoming files. Continue with normal protocol.
+		local command = getHeader(message, 1)
+		local image = getHeader(message, 2)
+		
+		--- CLIENT/UPDATING SERVER COMMANDS
+		if isClient or curImage ~= "" then
+		
+			local opDir = "/"
+			if isClient == false then
+				opDir = imagesDir.."/"..curImage
+			end
+      
+			if command == "PRG" and image == curImage then
+				if not hasPurged then
+					if not keepFiles or not isClient then
+						purgeSystem(opDir)
+					end
+					hasPurged = true
+				end
+				if isClient == false then
+					if not fs.exists(opDir) then
+						makeDir(opDir)				--create the image
+					end
+				end
+			end
+			
+			if command == "FIL" and image == curImage then
+				if hasPurged then
+					lastFile = getHeader(message, 3)
+					transferID = getHeader(message, 4)
+					if not isClient then
+						lastFile = opDir..lastFile
+					end
+				else
+					print ("File header sent before purge. Aborted.")
+					error()
+				end
+			end
+			
+			if command == "MDR" and image == curImage then
+				if hasPurged then
+					local newDir = getHeader(message, 3)
+					if not isClient then
+						newDir = opDir..newDir
+					end
+					handleMakeDir(newDir, curImage)
+				else
+					print ("mkdir command sent before purge. Aborted.")
+					error()
+				end
+			end
+			
+			if string.sub(command, 1, 3) == "RAW" then
+				if not isConflictingFilenameWithDir(lastFile) then
+					local tID = string.sub(command, 4, string.len(command))
+					if tID == transferID then
+						local fileData, f2 = string.sub(message, string.len(command) + 3, string.len(message))
+						receiveFile(lastFile, fileData)
+						fileCount = fileCount + 1
+						lastFile = ""
+						transferID = 0
+					end
+				else
+					conflictedFileCount = conflictedFileCount + 1
+				end
+			end
+			
+			if command == "FIN" and image == curImage then
+				if isClient then
+					printImageInstallResults()
+					break
+				else
+					curImage = ""
+					screenState = "main"
+					hasPurged = false
+					drawGUI()
+				end
+			end
+			
+		end
+		
+		--- SERVER COMMANDS
+		if not isClient then
+		
+			if command == "UPD" then
+				handleUpdate(image)
+			end
+			
+			if command == "CVR" then
+				if fs.exists(imagesDir.."/"..image) then
+					if fs.isDir(imagesDir.."/"..image) then
+						modem.transmit(channel, channel, "<CVR><"..image.."><"..compatibility..">")
+					end
+				end
+			end
+			
+			if command == "PSH" then
+				handlePushRequest(image, getHeader(message, 3))
+			end
+			
+		--- CLIENT COMMANDS
+		else
+		
+			if command == "CVR" and image == curImage then
+				if not hasPurged then
+					local compVer = getHeader(message, 3)
+					if isCompatibleVersions(version, compVer) then
+						requestUpdate(curImage)
+					else
+						print ("Incompatible GHOSTY versions.")
+						print ("Client version:               "..version)
+						print ("Server compatibility version: "..compVer)
+						break
+					end
+				end
+			end
+			
+			if command == "NAM" and image == curImage then
+				serverName = getHeader(message, 3)
+				print("Server name: "..serverName)
+			end
+			
+			if command == "PNK" and image == curImage then
+				print("Image update was declined by server.")
+				break
+			end
+			
+			if command == "POK" and image == curImage then
+				print("Image update was accepted by server. Updating...")
+				modem.transmit(channel, channel, "<PRG><"..curImage..">")
+				sendFile("/", curImage)
+				modem.transmit(channel, channel, "<FIN><"..curImage..">")
+				print("Update sent.")
+				break
+			end
+			
+		end
+		
+	end
+end
+
+
+--Extracts ghosty file data and writes its content to the computer's hard disk.
+function extractGhostyFileDataToDisk(fileData, purgeDir)
+	fVer, dat = getNextLine(fileData)
+	fVer = string.gsub(fVer, "File version:","")
+	if not isCompatibleVersions(fileVersion, fVer) then
+		print ("Incompatible file version.")
+		print ("Image file version:  "..fVer)
+		print ("Client file version: "..fileVersion)
+	end
+	fName, dat = getNextLine(dat)
+	fName = string.gsub(fName,"Image name:","")
+	fSizeTotal, dat = getNextLine(dat)
+	fSizeTotal = string.gsub(fSizeTotal, "File data size:", " ")
+	fSizeTotal = tonumber(fSizeTotal)
+	fCount, dat = getNextLine(dat)
+	fCount = string.gsub(fCount, "File count:", "")
+	fCount = tonumber(fCount)
+	dCount, dat = getNextLine(dat)
+	dCount = string.gsub(dCount, "Dir count:", "")
+	dCount = tonumber(dCount)
+	files = {}
+	dirs = {}
+	for i = 1, dCount, 1 do
+		dName, dat = getNextLine(dat)
+		dirs[i] = dName
+	end
+	for i = 1, fCount, 1 do
+		fName, dat = getNextLine(dat)
+		fSize, dat = getNextLine(dat)
+		fSize = tonumber(fSize)
+		files[i] = {fName, fSize}
+	end
+	--if fSizeTotal ~= string.len(dat) then
+	--	print("Image data size is corrupted; does image contain binary files?")
+	--	print("Reported data size: "..fSizeTotal)
+	--	print("Actual data size:   "..string.len(dat))
+	--	return false
+	--end
+	if purgeDir ~= nil then
+		purgeSystem(purgeDir)
+		hasPurged = true
+	end
+	for i = 1, dCount, 1 do
+		handleMakeDir(dirs[i])
+	end
+	datLoc = 1
+	for i = 1, fCount, 1 do
+		if not isConflictingFilenameWithDir(files[i][1]) then
+			if not isIgnoredFile(file) then
+				fDat = string.sub(dat, datLoc, datLoc + tonumber(files[i][2]))
+				receiveFile(files[i][1], fDat)
+				fileCount = fileCount + 1
+			end
+		end
+		datLoc = datLoc + tonumber(files[i][2]) + 1
+	end
+	return true
+end
+
+
+--Creates ghosty file data from the hard disk.
+function makeGhostyFileDataFromDisk(ghostImageName)
+	files, dirs, fCount, dCount, filesData = createFilesAndDirsImageData("")
+	rtn =   "-->-----------------------------------<\n"
+		  .."-->         GHOSTY image file         <\n"
+		  .."-->-----------------------------------<\n"
+		  .."--> This file was generated using     <\n"
+		  .."--> GHOSTY for ComputerCraft          <\n"
+		  .."-->                                   <\n"
+		  .."--> WARNING: Do not edit these values <\n"
+		  .."-->          unless you know what     <\n"
+		  .."-->          you're doing!            <\n"
+		  .."-->-----------------------------------<\n"
+		  .."--File version:    "..fileCompatibility.."\n"
+	    .."--Image name:      "..ghostImageName.."\n"
+		  .."--File data size:  "..string.len(filesData).."\n"
+		  .."--File count:      "..fCount.."\n"
+		  .."--Dir count:       "..dCount.."\n"
+		  .."--> \n"
+		  .."-->---------------<\n"
+		  .."-->  Directories  <\n"
+		  .."-->---------------<\n"
+		  .."--> \n"
+		  ..dirs
+		  .."--> \n"
+		  .."-->---------<\n"
+		  .."-->  Files  <\n"
+		  .."-->---------<\n"
+		  .."--> \n"
+		  ..files
+		  ..filesData.."\n"
+	return rtn
+end
+
+
+--Returns several variables that are formatted for GHOSTY image files.
+--out: entire files list, entire dirs list, file count, directory count, all file data
+function createFilesAndDirsImageData(baseDir)
+	local fList = fs.list(baseDir)
+	local fCount = 0
+	local dCount = 0
+	local filesList = ""
+	local dirsList = ""
+	local filesData = ""
+	for i, file in ipairs(fList) do
+		file=baseDir.."/"..file
+		if not isIgnoredFile(file) then
+			if not fs.isDir(file) then
+				local fdata = getFileData(file)
+				filesList=filesList.."--"..file.."\n--"..string.len(fdata).."\n"
+				filesData=filesData..fdata.."\n"
+				fCount = fCount + 1
+			else
+				dirsList=dirsList.."--"..file.."\n"
+				dCount = dCount + 1
+				_filesList, _dirsList, _fCount, _dCount, _filesData = createFilesAndDirsImageData(file)
+				filesList = filesList.._filesList
+				dirsList = dirsList.._dirsList
+				filesData = filesData.._filesData
+				fCount = fCount + _fCount
+				dCount = dCount + _dCount
+			end
+		end
+	end
+	return filesList, dirsList, fCount, dCount, filesData
+end
+
+
+--Makes an image of the local disk and uploads it to pastebin.
+function uploadDiskToPastebin(ghostImageName)
+	if not http then
+		print ("To upload to Pastebin, the http API is required.")
+		print ("Contact your server administrator or set enableAPI_http to true in ComputerCraft.cfg")
+		return
+	end
+	fileData = makeGhostyFileDataFromDisk(ghostImageName)
+	print ("Attempting to connect to Pastebin...")
+	respAttempt = http.post(pastebinUploadAddress, "api_option=paste&api_dev_key=401a70bae40b60c47071e89a2d4856d6&api_paste_name="..textutils.urlEncode(ghostImageName).."&".."api_paste_code="..textutils.urlEncode(fileData))
+	if respAttempt then
+		resp = respAttempt.readAll()
+		respAttempt.close()	
+		code = string.match( resp, "[^/]+$" )
+		if string.len(code) > 10 then
+			print ("Pastebin response: ")
+			print (code)
+			return
+		end
+		print ("Uploaded.")
+		print ("URL: "..resp)
+		print ("To install this image, run 'ghosty -ipb:"..code.."'")
+	else
+		print ("Failed to connect to Pastebin.")
+	end
+end
+
+
+--Downloads and installs a ghosty image from pastebin.
+function installImageFromPastebin(pastebinCode)
+	print ("Attempting to connect to Pastebin...")
+	respAttempt = http.get(pastebinDownloadAddress.."?i="..textutils.urlEncode(pastebinCode))
+	if respAttempt then
+		resp = respAttempt.readAll()
+		respAttempt.close()
+		if keepFiles then
+			extractGhostyFileDataToDisk(resp)
+		else
+			extractGhostyFileDataToDisk(resp, "/")
+		end
+		printImageInstallResults()
+	else
+		print ("Failed to connect to Pastebin.")
+	end
+end
+
+
+--Displays image installation results on terminal screen.
+function printImageInstallResults()
+	print(fileCount.." files copied.")
+	print(dirCount.." directories copied.")
+	if conflictedFileCount > 0 then
+		print (conflictedFileCount.." files failed to copy. A file name is conflicting with a directory name from the image.")
+	end
+	print("File system updated.")
+end
+
+
+--Returns the next line in a given string, followed by the remainder of the string (minus the line break)
+function getNextLine(strLines)
+	local loc
+	while string.sub(strLines,1,3) == "-->" do
+		loc = string.find(strLines, "\n")
+		if loc then
+			strLines = string.sub(strLines, loc+1)..""
+		else --nothing left, and last line is commented
+			return "", ""
+		end
+	end
+	loc = string.find(strLines, "\n")
+	if string.sub(strLines,1,2) == "--" then
+		strLines = string.sub(strLines,3)..""
+		if loc then
+			loc = loc - 2
+		end
+	end
+	if loc then 
+		--NOTE: had to concat empty strings to prevent strange behaviour from returning incorrect results
+		return string.sub(strLines,1,loc-1).."", string.sub(strLines, loc+1)..""
+	end
+	return strLines.."", ""
+end
+
+
+---Sends a file (or entire directory) over the channel.
+function sendFile(fileName, masterImage)
+	if not fs.exists(fileName) then
+		return
+	end
+	local cFile = fileName
+	if not isClient then 
+		cFile = getClientFilename(fileName, masterImage)
+	end
+	if string.len(cFile) == 0 then
+		cFile = "/"
+	end
+	if isIgnoredFile(cFile) then
+		return
+	end
+	if fs.isDir(fileName) then
+		if cFile ~= "/" then
+			makeDirRemote(cFile, masterImage)
+		end
+		local dirList = fs.list(fileName)
+		for i,fil in ipairs(dirList) do
+			if fileName == "/" then
+				sendFile(fileName..fil, masterImage)
+			else
+				sendFile(fileName.."/"..fil, masterImage)
+			end
+		end
+	else
+		tIDCount = tIDCount + 1
+		local tMsg = "<FIL><"..masterImage.."><"..cFile.."><"..tIDCount..masterImage..">"
+		modem.transmit(channel, channel, tMsg)
+		local fileData = getFileData(fileName)
+		modem.transmit(channel, channel, "<RAW"..tIDCount..masterImage..">"..fileData)
+	end
+
+end
+
+
+--Attempts to receive a file and write it to the local disk.
+function receiveFile(fileName, fileData)
+	if fs.exists(fileName) then
+		if not keepFiles then
+			print("File already sent; "..fileName)
+			return
+		end
+	end
+	writeFileData(fileName, fileData)
+end
+
+
+--Retrieves file data from a local file.
+--function getFileData(fileName)
+--	local fileHandle = io.open(fileName, "rb")
+--	local clock = os.clock() + 4
+	-- local fileData = {}
+	-- i = 1
+	-- for b in fileHandle.read do
+		-- fileData[i] = string.char(b)
+		-- if os.clock() >= clock then
+				-- os.queueEvent("")
+				-- coroutine.yield()
+			-- clock = os.clock() + 4
+		-- end
+		-- i = i + 1
+	-- end
+	-- fileHandle:close()
+	-- return table.concat(fileData)
+-- end
+
+
+
+-- function writeFileData(fileName, fileDat)
+	-- local fileHandle = io.open(fileName, "wb")
+	-- if fileHandle == nil then
+		-- print("Error creating file: "..fileName)
+		-- error()
+	-- end
+	-- local clock = os.clock() + 4
+	-- for i=1,string.len(fileDat),1 do
+		-- b = string.byte(fileDat, i)
+		-- fileHandle:write(b)
+		-- if os.clock() >= clock then
+				-- os.queueEvent("")
+				-- coroutine.yield()
+			-- clock = os.clock() + 4
+		-- end
+	-- end
+	-- fileHandle.close()
+-- end
+
+
+function getFileData(fileName)
+	local fileHandle = io.open(fileName, "r")
+	local fileData = fileHandle:read("*a")
+	fileHandle:close()
+	return fileData
+end
+
+
+function writeFileData(fileName, fileDat)
+	local fileHandle = io.open(fileName, "w")
+	if fileHandle == nil then
+		print("Error creating file: "..fileName)
+		error()
+	end
+	fileHandle:write(fileDat)
+	fileHandle:close()
+end
+
+
+--Sends a remote signal to create a directory for the given image.
+function makeDirRemote(dirName, masterImage)
+	modem.transmit(channel, channel, "<MDR><"..masterImage.."><"..dirName..">")
+end
+
+
+--Attempts to make a given directory.
+function makeDir(dirName)
+	local mkOk, errorMsg = pcall(fs.makeDir,dirName)
+	if not mkOk then
+		print ("Error making directory: "..dirName)
+		print (errorMsg)
+		return false
+	end
+	return true
+end
+
+
+--Handles a directory creation request for the given image.
+function handleMakeDir(dirName, masterImage)
+	if isClient and keepFiles then
+		if fs.exists(dirName) then
+			dirName = ""
+		end
+	end
+	if dirName ~= "" and makeDir(dirName) then
+		dirCount = dirCount + 1
+	end
+end
+
+
+---Handles an update request from a client.
+function handleUpdate(masterImage)
+	tDir = imagesDir.."/"..masterImage
+	if not fs.exists(tDir) then
+		return
+	end
+	if not fs.isDir(tDir) then
+		return
+	end
+	modem.transmit(channel, channel, "<PRG><"..masterImage..">")
+	if serverName ~= "" then
+		modem.transmit(channel, channel, "<NAM><"..masterImage.."><"..serverName..">")
+	end
+	sendFile(tDir, masterImage)
+	modem.transmit(channel, channel, "<FIN><"..masterImage..">")
+end
+
+
+--Handles a push request from a client.
+function handlePushRequest(masterImage, clientVer)
+	if curImage ~= "" then
+		--we're currently receiving another image; decline request
+		declinePushRequest(masterImage)
+	end
+	if not isCompatibleVersions(clientVer, compatibility) then
+		modem.transmit(channel, channel, "<CVR><"..masterImage.."><"..compatibility..">")
+		return
+	end
+	curImage = masterImage
+	if autoAccept then
+		screenState = "pushWait"
+		acceptPushRequest(masterImage)
+	else
+		dialogYes = false
+		screenState = "push"
+	end
+	drawGUI()
+end
+
+
+--Transmits a message, declining a client's push request.
+function declinePushRequest(masterImage)
+	modem.transmit(channel, channel, "<PNK><"..masterImage..">")
+end
+
+
+--Transmits a message, accepting a client's push request.
+function acceptPushRequest(masterImage)
+	if not fs.exists(imagesDir.."/"..masterImage) then
+		makeDir(imagesDir.."/"..masterImage)
+	end
+	if not fs.isDir(imagesDir.."/"..masterImage) then
+		print("Server images must be a directory.")
+		error()
+	end
+	modem.transmit(channel, channel, "<POK><"..masterImage..">")
+end
+
+
+--Sends an image push request to the server.
+function sendPushRequest(masterImage)
+	modem.transmit(channel, channel, "<PSH><"..masterImage.."><"..version..">")
+end
+
+
+---Purges all files from the directory. WARNING - use with extreme caution.
+function purgeSystem(purgeDir)
+	if purgeDir == "/" then
+		purgeDir=""
+	end
+	local dirList = fs.list(purgeDir)
+	for i,fil in ipairs(dirList) do
+		if isIgnoredFile(purgeDir.."/"..fil) == false then
+			local delOk, errorMsg = pcall(fs.delete,purgeDir.."/"..fil)
+			if not delOk then
+				print ("Error purging file: "..purgeDir.."/"..fil)
+				print (errorMsg)
+				error()
+			end
+		end
+	end
+end
+
+
+function isIgnoredFile(fileName)
+	for j,ignore in ipairs(ignoreFiles) do
+		if ignore == fileName then
+			return true
+		end
+	end
+	return false
+end
+
+
+function requestUpdate(masterImage)
+	modem.transmit(channel, channel, "<UPD><"..masterImage.."><"..version..">")
+end
+
+
+---Gets a header surrounded in <> of a given position, starting at 1.
+function getHeader(cmdStr, cmdPos)
+	local curPos = 1
+	for cmd in string.gmatch(cmdStr, "<(.-)>") do
+		if curPos == cmdPos then
+			return cmd
+		end
+		curPos = curPos + 1
+	end
+	return ""
+end
+
+
+function getClientFilename(serverFilename, imageName)
+	local rtn = string.gsub(serverFilename, imagesDir, "", 1)
+	rtn = string.gsub(rtn, "/"..imageName, "", 1)
+	return rtn
+end
+
+--Gets a directory name, stripping off the file name and trailing "/". If the root directory is returned, "/" is returned.
+function getDirFromFilename(fileName)
+	rtn = string.sub(fileName, 1, string.len(fileName)-string.find(string.reverse(fileName),"/",1))
+	if rtn == "" then
+		return "/"
+	end
+	return rtn
+end
+
+
+--Checks the current file system to see if a hypothetical absolute file location would
+--conflict with the file system. This would occur if a file exists that is the name of
+--one of the directories in the hypothetical file.
+function isConflictingFilenameWithDir(fileName)
+	dirName = fileName
+	while true do
+		dirName = getDirFromFilename(dirName)
+		if dirName == "/" then
+			return false
+		end
+		if fs.exists(dirName) then
+			if not fs.isDir(dirName) then
+				return true
+			end
+		end
+	end
+	error() --shouldn't reach here
+end
+
+
+--Requests the server for its compatibility version.
+function requestCompatibilityVersion(masterImage)
+	modem.transmit(channel, channel, "<CVR><"..masterImage..">")
+end
+
+
+--Checks if a version of something meets compatibility requirements.
+--Format: major.minor.revision
+function isCompatibleVersions(vers, comp)
+	versList = getVersionAsList(vers)
+	compList = getVersionAsList(comp)
+	for i=0,2,1 do
+		if versList[i] < compList[i] then
+			return false
+		end
+		if versList[i] > compList[i] then
+			return true
+		end
+	end
+	return true
+end
+
+
+--Converts a string containing a version number into a list of numbers, with the major version as the first index.
+function getVersionAsList(vers)
+	--had to use a round-about way to split this string since gmatch was giving some problems
+	verList = {0,0,0}
+	index = 0
+	s = ""
+	for i = 1,string.len(vers),1 do
+		local ts = string.sub(vers, i, i)
+		if ts ~= "." then
+			s = s..ts
+		end
+		if  ts == "." or i == string.len(vers) then
+			verList[index] = tonumber(s)
+			index = index + 1
+			s = ""
+		end
+	end
+	if (index ~= 3) then
+		return {0, 0, 0}
+	end
+	return verList
+end
+
+
+--Setup used by both client and server.
+function setup()
+    -- prevent user from terminating
+    os.pullEvent = os.pullEventRaw
+
+    for i,side in ipairs(sides) do
+		if peripheral.getType(side) == "modem" then
+			modem = peripheral.wrap(side)
+			modem.open(channel)
+			running = true
+		end
+    end
+	if not modem then
+		print("No modem attached.")
+		error()
+	end
+end
+
+
+--Prepares the server's images directory, and also checks for validity.
+function prepareImagesDir()
+	if not fs.exists(imagesDir) then
+		fs.makeDir(imagesDir)
+	elseif not fs.isDir(imagesDir) then
+		print (imagesDir.." is not a directory! Aborted.")
+		error()
+	end
+end
+
+
+--Shutdown performed by both client and server.
+function shutdown()
+	if modem then
+		modem.close(channel)
+	end
+end
+
+
+--Timeout function that sleeps for so long before returning.
+function waitForTimeout()
+	os.sleep(clientTimeout)
+	timedOut = true
+end
+
+
+--Displays the utility help.
+function showHelp(topic)
+	--{{topic, topic, topic}, {display other topic, display other topic}, "pre-text\n"
+	-- "topic text\n"
+	if topic == nil then
+		topic = ""
+	end
+	local tp = getHelpTopicTable(topic)
+	if tp == nil then
+		tp = getHelpTopicTable("")
+	end
+	if tp == nil then
+		print("No blank help topic found??")
+		error()
+	end
+	print ("GHOSTY v"..version.." disk cloning utility")
+	print ("")
+	helpText = tp[3]..""    --Start with the topic header (if any)
+	for i,included in ipairs(tp[2]) do
+		local inctp = getHelpTopicTable(included)
+		if inctp then
+			helpText = helpText..inctp[4]
+		else
+			print("Missing help topic (included topic): "..included)
+		end
+	end
+	helpText = helpText..tp[4]
+	print (helpText)
+end
+
+
+--Retrieves a help topic table based on a given topic subject.
+function getHelpTopicTable(topicName)
+	for i,tp in ipairs(helpTopics) do
+		for j,name in ipairs(tp[1]) do
+			if name == topicName then
+				return tp
+			end
+		end
+	end
+	return nil
+end
+
+function main()
+	
+	local clientPush = false
+
+	--handle program arguments
+	if table.getn(args) > 0 then
+	
+		local majorActions = 0
+	
+		--Primary arguments
+		for i,arg in ipairs(args) do
+			if arg == "-server" or arg == "-s" then
+				isClient = false
+				majorActions = majorActions + 1
+			end
+			if arg == "-a" then
+				autoAccept = true
+			end
+			if string.sub(arg, 1, 5) == "-ipb:" then
+				local tpbcode = string.sub(arg,6,string.len(arg))
+				installImageFromPastebin(tpbcode)
+				return
+			end
+			if arg == "-pbupdate" or arg == "-pbupload" then
+				uploadDiskToPastebin("GHOSTY_image")
+				return
+			end
+			if string.sub(arg, 1, 3) == "-i:" then
+				curImage = string.sub(arg,4,string.len(arg))
+				majorActions = majorActions + 1
+			end
+			if string.sub(arg, 1, 8) == "-images:" then
+				local tdir = string.sub(arg,9,string.len(arg))
+				if not fs.exists(tdir) then
+					print ("Cannot set images directory: no such directory!")
+					return
+				end
+				if not fs.isDir(tdir) then
+					print ("Cannot set images directory: not a directory!")
+					return
+				end
+				imagesDir = tdir
+			end
+			if string.sub(arg, 1, 8) == "-update:" or string.sub(arg, 1, 8) == "-upload:" then
+				curImage = string.sub(arg,9,string.len(arg))
+				if curImage == "" then
+					showHelp()
+					return
+				end
+				clientPush = true
+				majorActions = majorActions + 1
+			end
+			if string.sub(arg, 1, 9) == "-channel:" then
+				local tnum = tonumber(string.sub(arg,10,string.len(arg)))
+				if tnum == nil then
+					print ("Not a valid channel number.")
+					return
+				end
+				if tnum < 1 or tnum > 65535 then
+					print ("Out-of-range channel number.")
+					return
+				end
+				channel = tnum
+			end
+			if string.sub(arg, 1, 6) == "-name:" then
+				serverName = string.sub(arg,7,string.len(arg))
+			end
+			if arg == "-purgesys" then
+				purgeSystem("/")
+				print ("File system purged.")
+				return
+			end
+			if arg == "help" or arg == "-help" or arg == "/help" or arg == "?" or arg == "/?" or arg == "-?" then
+				showHelp()
+				return
+			end
+			if string.sub(arg, 1, 3) == "-?:" then
+				argarg = string.sub(arg, 4)
+				showHelp(argarg)
+				return
+			end
+		end
+		
+		--Secondary arguments (reliant on primary)
+		for i,arg in ipairs(args) do
+			if string.sub(arg, 1, 8) == "-nopurge" and isClient then
+				keepFiles = true
+			end
+		end
+		
+		--Tertiary arguments (reliant on secondary)
+		for i,arg in ipairs(args) do
+			if string.sub(arg, 1, 9) == "-mkimage:" then -- Create the image. Nothing else.
+				local timgfile = string.sub(arg, 10)
+				if timgfile == "" then
+					print("Usage: -mkimage:<image-filename>")
+					print("Generates an image file of the local hard disk.")
+					return
+				end
+				local fildat = makeGhostyFileDataFromDisk("GHOSTY_image")
+				local fh = io.open(timgfile,"w")
+				fh:write(fildat)
+				fh:close()
+				print ("Image created as file "..timgfile)
+				return
+			end
+			if string.sub(arg, 1, 7) == "-ifile:" then
+				local timgfile = string.sub(arg, 8)
+				local fh = io.open(timgfile,"r")
+				if not fh then
+					print ("Cannot open image file: "..timgfile)
+					return
+				end
+				local fildat = fh:read("*a")
+				fh:close()
+				if keepFiles then
+					extractGhostyFileDataToDisk(fildat)
+				else
+					extractGhostyFileDataToDisk(fildat, "/")
+				end
+				print ("Image installed.")
+				return
+			end
+		end
+		
+		if majorActions > 1 then
+			print("Too many arguments provided.")
+			return
+		end
+		
+		if majorActions < 1 then
+			print("Not enough arguments provided.")
+			return
+		end
+		
+	else -- Show GUI
+    setup()
+		clientGui()
+    shutdown()
+		return
+	end
+	if curImage == "" and isClient then
+		showHelp()
+		return
+	end
+	
+	setup()
+	
+	if not isClient then
+		prepareImagesDir()
+		parallel.waitForAny(serverGui, modemListen)
+	else
+		print("GHOSTY v"..version.." client")
+		print("Image: "..curImage)
+		if clientPush then
+			print("Requesting to update image on channel "..channel.."...")
+			sendPushRequest(curImage)
+		else
+			print("Requesting image on channel "..channel.."...")
+			requestCompatibilityVersion(curImage)
+		end
+		parallel.waitForAny(waitForTimeout, modemListen)
+		if timedOut then
+			print ("Timed out waiting for server.")
+		end
+	end
+	
+	shutdown()
+	
+end
+
+
+
+
+main()
+sleep(0)
