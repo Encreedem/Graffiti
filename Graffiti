@@ -765,17 +765,16 @@ function getInput()
     return "quit", currentScreen -- Used for the API
   end
   
-  sObjectID, sObject = findObject(x, y)
+  local param, screen
+  local sObjectID, sObject = findObject(x, y)
   if (sObjectID ~= nil and sObject ~= nil) then
     objectType = sObject.objType
     
     if (objectType == "Button") then
-      if isAPI and sObject.funcType == "function" then
-        return sObject.param, currentScreen
-      elseif (sObject.isAddon) then
+      if (sObject.isAddon) then
         callAddOn(sObject, "Click")
       elseif (sObject.funcType ~= nil and sObject.param ~= nil) then
-        callAction(sObject)
+        param, screen = callAction(sObject)
       end
     elseif (objectType == "Input") then
       getUserInput(sObject)
@@ -799,6 +798,8 @@ function getInput()
       callAddOn(sObject, "Click")
     end
   end
+  
+  return param, screen
 end
 
 function callAction(button)
@@ -807,6 +808,7 @@ function callAction(button)
   
   if (actionType == "switch") then
     showScreen(param)
+    return nil, param
   elseif (actionType == "function") then
     if changeButtonColor then
       showButton(button, buttonPressedColor)
@@ -823,6 +825,8 @@ function callAction(button)
     else
       changeButtonColor = true
     end
+    
+    return param, currentScreen
   end
 end
 
