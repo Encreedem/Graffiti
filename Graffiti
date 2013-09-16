@@ -1,98 +1,145 @@
-local version = "Graffiti v1.5"
+-- TODO: The Progress Bars movePos and scalePos get messed up when it's facing up.
 
--- fields for users
-userFunctions = {}
-userLists = {}
-selectedItems = {}
-userInputs = {}
+local version = "1.6"
 
---monitor
-local monitorSide = ""
+-- >>> Variables
+
+-- Tables for users:
+local userFunctions = {}
+local userLists = {}
+local userInputs = {}
+local selectedItems = {}
+local selectedFiles = {}
+
+--Monitor
 local monitor = nil
 
--- texts
-local refreshText = "Refresh"
-local backText = "Back"
-local doneString = "Done"
+-- Text
+local text = {}
+text.back = " < "
+text.quit = " X "
+text.refresh = "Refresh"
+text.done = "Done"
+text.options = "Options"
+text.fileSelector = "[...]"
 
--- colors
-local buttonDefaultColor = colors.red
-local buttonPressedColor = colors.lime
-local sliderLowValueColor = colors.red
-local sliderMediumValueColor = colors.yellow
-local sliderHighValueColor = colors.lime
-local inputDefaultColor = colors.white
-local inputDefaultTextColor = colors.black
-local inputPressedColor = colors.yellow
-local listDefaultColor = colors.lightBlue
-local listSelectedColor = colors.orange
-local editorMoveColor = colors.magenta
-local editorScaleColor = colors.pink
-local editorMarkerColor = colors.gray
-local editorAlignmentTrueColor = colors.lime
-local editorAlignmentFalseColor = colors.red
+-- Colors
+local objectColors = {}
+local colorTheme = "Default"
 
--- sizes
-local buttonDefaultWidth = 10
-local buttonDefaultHeight = 3
-local sliderDefaultLength = 10
+-- Color Themes
+local colorThemes = {}
+colorThemes.Default = {
+  background = colors.black;
+  text = colors.white;
+  Button = { default = colors.red; active = colors.lime; text = colors.white };
+  ProgressBar = { low = colors.red; medium = colors.yellow; high = colors.lime; background = colors.gray; };
+  Input = { default = colors.white; text = colors.black; active = colors.yellow; };
+  List = { default = colors.blue; active = colors.lightBlue; };
+  FileSelector = { default = colors.red; text = colors.white; dir = colors.lime; file = colors.white; active = colors.lime; };
+  Editor = {
+    new = colors.white;
+    active = colors.lime;
+    move = colors.magenta;
+    scale = colors.pink;
+    marker = colors.gray;
+    alignmentTrue = colors.lime;
+    alignmentFalse = colors.red;
+  };
+  Container = {
+    Panel = {
+      border = colors.white;
+    };
+  };
+}
 
--- save file
-saveFileName = "Graffiti.sav"
+colorThemes["Windows CC"] = {
+  background = colors.white;
+  text = colors.black;
+  Button = { default = colors.lightGray; active = colors.lightBlue; text = colors.black };
+  ProgressBar = { low = colors.lime; medium = colors.lime; high = colors.lime; background = colors.lightGray; };
+  Input = { default = colors.lightGray; text = colors.black; active = colors.white; };
+  List = { default = colors.lightGray; active = colors.lightBlue; };
+  FileSelector = { default = colors.gray; text = colors.black; dir = colors.blue; file = colors.black; active = colors.lightBlue; };
+  Editor = {
+    new = colors.lightBlue;
+    active = colors.black;
+    move = colors.magenta;
+    scale = colors.pink;
+    marker = colors.gray;
+    alignmentTrue = colors.lime;
+    alignmentFalse = colors.red;
+  };
+  Container = {
+    Panel = {
+      border = colors.lightGray;
+    };
+  };
+}
+
+for key, value in pairs(colorThemes[colorTheme]) do
+  objectColors[key] = value
+end
+
+-- Sizes
+local size = {}
+size.Button = { width = 10; height = 3; }
+size.ProgressBar = { length = 10; }
+size.Container = { width = 20; height = 10; }
+
+-- Save File
+local saveFileName = "Graffiti.sav"
 
 -- API
-initDone = false
-isAPI = false -- Determines whether the program has been loaded as an API
-variableValues = {}
-sliderValues = {}
+local initDone = false
+local isAPI = false -- Determines whether the program has been loaded as an API
+local variableValues = {}
+local progressBarValues = {}
 
--- editor options
+-- Editor Options
 local editMode = false
 local showEditorOptions = false
 local editActions = { "Design", "Attributes", "Delete" }
-local lastScreen = "mainScreen"
+local lastWindow = "mainWindow"
 local editorFunctions = {}
-local objectTypes = { "Button", "Text", "Variable", "Slider", "Input", "List" }
 local rightClickActions = {"Attributes", "Delete" }
 
--- AddOn options
-local addOns = {}
-local addOnExtension = ".add"
-
--- other
+-- tables
 local args = { ... }
+local sides = { "left", "top", "right", "bottom", "front", "back" }
+local objectTypes = { "Button", "Text", "Variable", "ProgressBar", "Input", "List", "Panel" }
+local eventTypes = { "quit", "button_clicked", "button_toggled", "selection_changed", "text_changed" }
+local objects = {}
+local windows = { children = { mainWindow = { objType = "Window", children = {} } } }
+local windowBuffer = nil
+local defaultButtons = {}
+
+-- Other
 local quit = false
 local maxX, maxY = 51, 19
 local out = term -- Output: either "term" or the monitor
 local outIsTerm = false
 local autoLoadObjects = true
 local changeButtonColor = true
-local screens = {}
-screens.mainScreen = {}
-currentScreen = "mainScreen"
-local sides = { "left", "top", "right", "bottom", "front", "back" }
+local currentWindow = "mainWindow"
 
--- Displays a star in the upper left corner for a
--- short amount of time. Used when you want to see
--- when something certain happens.
--- Should only be used when you are desperately
--- looking for a bug.
-function extremeDebug()
-  out.setCursorPos(1, 1)
-  out.write("*")
-  os.sleep(0.5)
-  out.setCursorPos(1, 1)
-  out.write(" ")
-  os.sleep(0.5)
-end
+-- >> User Functions
 
 -- user variables
 local randomValue= 50
 
 -- user functions
 
+function userFunctions.test()
+  sleep(1)
+end
+
 function userFunctions.setRandomValue()
   randomValue = math.random(100)
+end
+
+function userFunctions.refresh()
+  drawWindow()
 end
 
 -- user lists
@@ -104,120 +151,957 @@ userLists.testList = {
 }
 
 -- Define the value of a variable-object.
-function getVariableValue(variableID)
-  if (variableID == nil) then
-    return ""
-  end
+function getVariableValue(object)
+  assert(object)
+  local objID = object.objID
   
-  if (variableID == "testVariable") then
+  if (objID == "testVariable") then
     return "Variable";
-  elseif (variableID == "Time") then
+  elseif (objID == "Time") then
     return textutils.formatTime(os.time(), true)
   else
-    return variableValues[variableID]
+    return variableValues[objID]
   end
 end
 
--- Definie the value of a slider-object
+-- Definie the value of a progressBar-object
 -- 0: empty; 100: full
-function getSliderValue(sliderID)
-  if (sliderID == nil or sliderID == "") then
+function getProgressBarValue(object)
+  assert(object)
+  local objID = object.objID
+  
+  if (objID == "testProgressBar") then
+    return 87
+  elseif (objID == "randomProgressBar") then
+    return randomValue
+  else
+    return progressBarValues[objID]
+  end
+end
+
+--[[ WARNING!
+Everything below this comment
+shouldn't be edited!
+If you do so and the program doesn't work anymore
+then it's your fault!
+]]
+
+--[[ Displays the text, the content of a table
+or a star in the upper left corner until you press
+a key.]]
+function dBug(text)
+  out.setCursorPos(1, 1)
+  
+  if (text == nil) then
+    out.write("*")
+    getKeyInput()
+    out.setCursorPos(1, 1)
+    out.write(" ")
+    return
+  elseif (type(text) == "table") then
+    for key, value in pairs(text) do
+      print(key .. ": " .. tostring(value))
+    end
+  else
+    out.write(text)
+  end
+  
+  getKeyInput()
+end
+
+-- >>> Shortcut functions (for key inputs)
+-- Not yet implemented! WIP!
+-- TODO: Fix bug where the key event won't disappear from the queue.
+
+function callShortcut(key)
+  --if (key and shortcut[key]) then
+  --  shortcut[key]()
+  --end
+end
+
+shortcut = {}
+
+-- s
+shortcut[31] = function()
+  out.clear()
+  out.setCursorPos(1, 1)
+  print("Saving windows...")
+  
+  saveWindows()
+  
+  print("Windows saved!")
+  print("Press any key to continue...")
+end
+
+-- q
+shortcut[16] = function()
+  quit = true
+end
+
+-- >>> Object helper functions
+
+function clearScreen()
+  out.setBackgroundColor(objectColors.background)
+  out.setTextColor(objectColors.text)
+  out.clear()
+  out.setCursorPos(1, 1)
+end
+
+function initDefaultButtons()
+  defaultButtons.quit = {
+    text=text.quit,
+    left=maxX - string.len(text.quit) + 1,
+    top=1,
+    right=maxX,
+    bottom=1,
+    required = function()
+      return true
+    end
+  }
+  
+  defaultButtons.back = {
+    text = text.back,
+    left = 1,
+    top = 1,
+    right = string.len(text.back),
+    bottom = 1,
+    required = function()
+      return getCurrentWindow().showBackButton
+    end
+  }
+  
+  defaultButtons.refresh = {
+    text = text.refresh,
+    left = maxX - string.len(text.refresh) + 1,
+    top = maxY,
+    right = maxX,
+    bottom = maxY,
+    required = function()
+      return (getCurrentWindow().showRefreshButton or (editMode and not showEdtorOptions))
+    end
+  }
+  
+  defaultButtons.options = {
+    text = text.options,
+    left = 1,
+    top = maxY,
+    right = string.len(text.options),
+    bottom = maxY,
+    required=function()
+      return (editMode and not showEditorOptions)
+    end
+  }
+end
+
+-- Returns whether the button with the given name
+-- has been pressed.
+function defaultButtonPressed(name, x, y)
+  assert(name)
+  assert(x)
+  assert(y)
+  
+  local window = getCurrentWindow()
+  
+  if (defaultButtons[name]) then
+    local button = defaultButtons[name]
+    if (x >= button.left and x <= button.right and y >= button.top and y <= button.bottom) then
+      return (button.required() or (editMode and not showEditorOptions and currentWindow ~= "mainWindow"))
+    end
+  else
+    return false
+  end
+end
+
+-- Returns the window object that is currently
+-- displayed.
+function getCurrentWindow()
+  if showEditorOptions then
+    return editorWindows.children[currentWindow]
+  else
+    return windows.children[currentWindow]
+  end
+end
+
+-- Used by the List and Selector objects to
+-- determine how wide the list should be.
+function getLongestString(strings)
+  if (strings == nil or #strings == 0) then
     return 0
   end
   
-  if (sliderID == "testSlider") then
-    return 87;
-  elseif (sliderID == "randomSlider") then
-    return randomValue
-  else
-    return sliderValues(sliderID)
-  end
-end
-
--- WARNING! Everything below this comment
--- shouldn't be edited! If you do so and the program
--- doesn't work any more then it's your fault!
-
--- API function: Sets the value of all variables
--- with the given ID.
-function setVariableValue(variableID, newVar)
-  variableValues[variableID] = newVar
-end
-
--- API function: Sets the value of all sliders
--- with the given ID.
-function setSliderValue(sliderID, newVar)
-  sliderValues[sliderID] = newVar
-end
-
--- Returns where the user clicked and which button
--- he pressed (always 1 if it's a monitor).
-function getCursorInput()
-  local finished = false
+  local ret = 0
   
-  while not finished do
-    event, param, x, y = os.pullEvent()
-    
-    if (event == "monitor_touch" and not outIsTerm) then
-      mouseButton = 1
-      finished = true
-    elseif (event == "mouse_click" and outIsTerm) then
-      mouseButton = param
-      finished = true
+  for key, value in pairs(strings) do
+    length = string.len(value)
+    if (length > ret) then
+      ret = length
     end
-  end
-  
-  return x, y, mouseButton
-end
-
-function readUserInput(message, isPassword)
-  if not outIsTerm then
-    print(message)
-  end
-    
-  if isPassword  then
-    ret = read("*")
-  else
-    ret = read()
   end
   
   return ret
 end
 
--- Redirects the input to the computer and lets
--- the user enter something. The result will be
--- in the userInputs array with the inputID as the
--- key.
-function getUserInput(inputObject)
-  if (inputObject == nil or inputObject.objType ~= "Input") then
+-- Checks whether dir is a valid direction-string.
+function isValidDirection(dir)
+  if (dir ~= nil and
+     (dir == "left" or 
+      dir == "up" or 
+      dir == "right" or 
+      dir == "down")) then
+    return true
+  end
+  
+  return false
+end
+
+--[[ Returns a table containing tables for all
+files and directories in the given path:
+Returns: fileName, filePath, isDir
+]]
+function getFileList(path)
+  local ret = {}
+  local dirList = {}
+  local fileList = {}
+  
+  for file in fs.list(path) do
+    if (fs.isDir(file)) then
+      table.insert(dirList, dirIndex, file)
+      dirIndex = dirIndex + 1
+    else
+      table.insert(fileList, fileIndex, file)
+      fileIndex = fileIndex + 1
+    end
+  end
+  for _, file in ipairs(dirList) do
+    table.insert(list, {fileName=file, filePath=fs.combine(path, file), isDir=true})
+  end
+  for _, file in ipairs(fileList) do
+    table.insert(list, {fileName=file, filePath=fs.combine(path, file), isDir=false})
+  end
+  
+  return ret
+end
+
+-- Returns "horizontal" or "vertical" depending on
+-- the given direction.
+function getOrientation(direction)
+  local orientation = nil
+
+  if (direction == "left" or direction == "right") then
+    orientation = "horizontal"
+  elseif (direction == "up" or direction == "down") then
+    orientation = "vertical"
+  end
+
+  return orientation
+end
+
+function eventTypeExists(eventType)
+  if (eventType == nil) then
+    return true
+  end
+  
+  for _, event in pairs(eventTypes) do
+    if (event == eventType) then
+      return true
+    end
+  end
+  
+  return false
+end
+
+-- >>> Path
+
+Path = {}
+function Path:getParent()
+  return Path.getContainerAt(self, #self - 1)
+end
+
+function Path:getContainerAt(nestLevel)
+  local container = getCurrentWindow()
+  
+  for i = 1, nestLevel do
+    if (container.children[self[i]] and container.children[self[i]].isContainer) then
+      container = container.children[self[i]]
+    else
+      return nil -- NOTE: was "break" before
+    end
+  end
+  
+  return container
+end
+
+function Path:getObject()
+  local container = Path.getContainerAt(self, #self - 1)
+  return container.children[self[#self]]
+end
+
+-- Returns the coordinates which are relative to
+-- the last container represented by the path.
+function Path:getRelativePos(x, y, checkFullPath)
+  local container
+  local limit = checkFullPath and #self or #self - 1
+  
+  for i = 1, limit do
+    container = Path.getContainerAt(self, i)
+    
+    if container then
+      x, y = objects.Container.getRelativePos(container, x, y)
+      --if not (container.children[self[i + 1]] and container.children[self[i + 1]].isContainer) then
+      --  break
+      --end
+    else
+      break
+    end
+  end
+  
+  return x, y
+end
+
+--[[ Generates a table of keys representing the
+nesting of the containers that have been clicked.
+Returns: e.g. {containeID, subContainerID}]]
+Path.getContainerPath = function(x, y)
+  local containerPath = {}
+  local currentContainer = getCurrentWindow()
+  local finished = false
+  local nestLevel = 1
+  
+  while not finished do
+    finished = true -- Set to true so that the loop stops when no container is found.
+    for objectID, object in pairs(currentContainer.children) do
+      if finished and object.isContainer then
+        if (objects.Container.contentAreaClicked(object, x, y)) then
+          containerPath[nestLevel] = objectID
+          currentContainer = currentContainer.children[objectID]
+          x, y = objects.Container.getRelativePos(currentContainer, x, y)
+          finished = false
+        end
+      end
+    end
+    
+    nestLevel = nestLevel + 1
+  end
+  
+  return containerPath
+end
+
+-- >>> Buffer
+
+Buffer = {
+  bufferTable = {};
+  width = 0;
+  height = 0;
+}
+
+function Buffer.newPixel(backCol, textCol, char, path)
+  local ret = {}
+  ret.background = backCol or objectColors.background
+  ret.text = textCol or objectColors.text
+  ret.char = (type(char) == "string" and char ~= "") and char or " "
+  ret.path = path or nil
+  
+  return ret;
+end
+
+function Buffer:new(object)
+  object = object or {}
+  setmetatable(object, self)
+  self.__index = self
+  return object
+end
+
+function Buffer:init(width, height, path, backCol, textCol)
+  self.width = width or error("Can't initialize buffer because the width didn't get specified!")
+  self.height = height or error("Can't initialize buffer because the height didn't get specified!")
+  self.bufferTable = {}
+  
+  for col = 1, width do
+    self.bufferTable[col] = {}
+    for row = 1, height do
+      self.bufferTable[col][row] = self.newPixel(backCol, textCol, " ", path)
+    end
+  end
+end
+
+function Buffer:trim(left, top, right, bottom)
+  left = (left < 0) and 0 or left
+  top = (top < 0) and 0 or top
+  right = (right < 0) and 0 or right
+  bottom = (bottom < 0) and 0 or bottom
+  
+  local width = self.width - left - right
+  local height = self.height - top - bottom
+  local trimmed = Buffer:new()
+  trimmed:init(width, height)
+  
+  for col = 1, width do
+    for row = 1, height do
+      trimmed:setPixel(col, row, self.bufferTable[left + col][top + row])
+    end
+  end
+  
+  return trimmed
+end
+
+function Buffer:draw(x, y)
+  x = x or 1
+  y = y or 1
+  local currentPixel
+  
+  for col = 0, self.width - 1 do
+    for row = 0, self.height - 1 do
+      currentPixel = self.bufferTable[col+1][row+1]
+      out.setCursorPos(x + col, y + row)
+      out.setBackgroundColor(currentPixel.background)
+      out.setTextColor(currentPixel.text)
+      out.write(currentPixel.char)
+    end
+  end
+end
+
+function Buffer:setBackgroundColor(color)
+  for col = 1, width do
+    for row = 1, height do
+      self.bufferTable[col][row].background = color
+    end
+  end
+end
+
+function Buffer:setTextColor(color)
+  for col = 1, width do
+    for row = 1, height do
+      self.bufferTable[col][row].text = color
+    end
+  end
+end
+
+function Buffer:setPixel(x, y, pixel)
+  assert(x)
+  assert(y)
+  assert(pixel)
+  if (x > 0 and x <= self.width and y > 0 and y <= self.height) then
+    for key, value in pairs(pixel) do
+      if value then
+        self.bufferTable[x][y][key] = value
+      end
+    end
+  end
+end
+
+function Buffer:addText(x, y, text)
+  assert(x)
+  assert(y)
+  assert(text)
+  
+  for char in text:gmatch(".") do
+    self:setPixel(x, y, { char=char })
+    x = x + 1
+  end
+end
+
+function Buffer:addBuffer(x, y, buffer)
+  assert(x)
+  assert(y)
+  assert(buffer)
+  for col = 1, buffer.width do
+    for row = 1, buffer.height do
+      self:setPixel(x + col - 1, y + row - 1, buffer.bufferTable[col][row])
+    end
+  end
+end
+
+-- >>> Objects
+
+objects = {}
+-- Returns a new object with its default attributes
+-- depending on the object type.
+function objects.new(objectType, x, y)
+  local object = {}
+  local path = Path.getContainerPath(x, y)
+  local relativeX, relativeY = Path.getRelativePos(path, x, y, true)
+  
+  object.objID = "new" .. objectType
+  object.objType = objectType
+  object.path = path
+  object.x = relativeX
+  object.y = relativeY
+  object.absoluteX = x
+  object.absoluteY = y
+  
+  local maxWidth = maxX - x
+  local maxHeight = maxY - y
+  
+  if (objects[objectType] and objects[objectType].new) then
+    objects[objectType].new(object, maxWidth, maxHeight)
+  elseif (objects.Container[objectType]) then
+    objects.Container.new(object, maxWidth, maxHeight)
+  else
+    objects["Unknown"].new(objectType)
+  end
+  
+  return object
+end
+
+function objects.create(objType, x, y)
+  local object = objects.new(objType, x, y)
+  local container = Path.getContainerAt(object.path, #object.path)
+  local key = objects.Container.getNextFreeKey(container)
+  table.insert(object.path, key)
+  table.insert(container.children, key, object)
+  
+  windowBuffer:addBuffer(x, y, objects.get(object))
+  objects.draw(object)
+end
+
+-- Returns the buffer of the object.
+function objects.get(self, param)
+  local objType = self.objType or "Unknown"
+  if (self.isContainer) then
+    return objects.Container.get(self, param)
+  elseif (objects[objType] and objects[objType].get) then
+    return objects[objType].get(self, param)
+  else
+    error("Can't get buffer of object type \"" .. objType .. "\"!")
+  end
+end
+
+function objects.remove(self)
+  local path = self.path
+  local objKey = path[#path]
+  local container = Path.getContainerAt(self.path, #self.path - 1)
+  
+  container.children[objKey] = nil
+  
+  for i = #path - 2, 0, -1 do
+    local parentContainer = Path.getContainerAt(self.path, i)
+    parentContainer.children[path[i + 1]] = container
+    container = parentContainer
+  end
+  
+  windows.children[currentWindow] = container
+end
+
+-- Draws the object.
+function objects.draw(self, param)
+  local objType = self.objType
+  
+  if (#self.path > 1) then
+    local container = getCurrentWindow()
+    local x, y = self.absoluteX, self.absoluteY
+    objects.Container.drawBuffer(container, objects.get(self, param), self.path, x, y, x, y, 0)
+  else
+    local buffer = objects.get(self, param)
+    buffer:draw(self.x, self.y)
+  end
+end
+
+-- Returns the resulting event and a "params"-array.
+function objects.click(self, x, y)
+  local objType = self.objType
+  local event, params
+  if objects[objType] and objects[objType].click then
+    event, params = objects[objType].click(self, x, y)
+  elseif (self.isContainer and objects.Container[objType] and objects.Container[objType].click) then
+    event, params = objects.Container[objType].click(self, x, y)
+  end
+  
+  return event, params
+end
+
+-- Moves the object.
+function objects.move(self, addX, addY)
+  assert(self)
+  
+  local objType = self.objType
+  
+  if (objects[objType] and objects[objType].move) then
+    objects[objType].move(self, addX, addY)
+  elseif (self.isContainer) then
+    self.x = self.x + addX
+    self.y = self.y + addY
+    objects.Container.move(self, addX, addY)
+  else
+    self.x = self.x + addX
+    self.y = self.y + addY
+    self.absoluteX = self.absoluteX + addX
+    self.absoluteY = self.absoluteY + addY
+  end
+end
+
+-- Scales the object.
+function objects.scale(self, x, y)
+  assert(self)
+  local objType = self.objType
+  
+  if (objects[objType] and objects[objType].scale) then
+    objects[objType].scale(self, x, y)
+  elseif (self.isContainer and objects.Container[objType].scale) then
+    objects.Container[objType].scale(self, x, y)
+  else
+    local objX, objY = self.x, self.y
+    if (x > objX and y >= objY) then
+      self.width = x - objX + 1
+      self.height = y - objY + 1
+    end
+  end
+end
+
+--[[ Returns the position of the pixel which shows
+the user where to click when he wants to move the
+object.]]
+function objects.getMovePos(self)
+  local objType = self.objType
+  if (objects[objType] and objects[objType].getMovePos) then
+    return objects[objType].getMovePos(self)
+  elseif (self.isContainer and objects.Container[objType] and objects.Container[objType].getMovePos) then
+    return objects.Container[objType].getMovePos(self)
+  else
+    return self.absoluteX, self.absoluteY
+  end
+end
+
+--[[ Returns the position of the pixel which shows
+the user where to click when he wants to scale the
+object.]]
+function objects.getScalePos(self)
+  if not self.canScale then
+    error("Tried to get scale pos of an unscalable object!")
+  end
+  
+  local objType = self.objType
+  if (objects[objType] and objects[objType].getScalePos) then
+    return objects[objType].getScalePos(self)
+  elseif (self.isContainer and objects.Container[objType].getScalePos) then
+    objects.Container[objType].getScalePos(self)
+  else
+    return self.absoluteX + self.width - 1, self.absoluteY + self.height - 1
+  end
+end
+
+-- Returns the left, top, right and bottom coordinates of the object.
+function objects.getDimensions(self)
+  local objType = self.objType
+  if (objects[objType] and objects[objType].getDimensions) then
+    return objects[objType].getDimensions(self)
+  elseif (self.isContainer and objects.Container[objType] and objects.Container[objType].getDimensions) then
+    return objects.Container[objType].getDimensions(self)
+  else
+    local left, top, right, bottom
+    left, top = self.x, self.y
+    right = left + self.width - 1
+    bottom = top + self.height - 1
+    return left, top, right, bottom
+  end
+end
+
+-- >> Unknown
+objects.Unknown = {}
+objects.Unknown.new = function(objType)
+  objType = objType and " \"" .. objType .. "\"" or ""
+  error("Tried to create new object with unknown object ID" .. objType .. "!")
+end
+
+objects.Unknown.get = function(self)
+  error("Tried to get the buffer of and unknown object!")
+end
+
+objects.Unknown.draw = function(self)
+  assert(self, "Draw function got called with nil parameter!")
+  
+  local x = self.x
+  local y = self.y
+  
+  if (x and y) then
+    out.setCursorPos(x, y)
+    out.write("?")
+  else
+    error("Tried to draw invalid object!")
+  end
+end
+
+-- >> Button
+objects.Button = {}
+objects.Button.new = function(self, maxWidth, maxHeight)
+  self.width = (maxWidth < size.Button.width) and maxWidth or size.Button.width
+  self.height = (maxHeight < size.Button.height) and maxHeight or size.Button.height
+  self.widthPercent = maxX / self.width
+  self.heightPercent = maxY / self.height
+  self.text = "Button"
+  self.funcType = ""
+  self.param = ""
+  self.canScale = true
+  self.canClick = true
+end
+
+objects.Button.get = function(self, buttonColor)
+  local width = self.width
+  local height = self.height
+  local path = self.path
+  local text = self.text
+  local color = buttonColor or objectColors.Button.default
+  
+  local buffer = Buffer:new()
+  local textCol = math.floor((width - string.len(text)) / 2) + 1
+  local textRow = math.ceil(height / 2)
+  buffer:init(width, height, path, color, objectColors.Button.text)
+  buffer:addText(textCol, textRow, text)
+  
+  return buffer
+end
+
+-- Returns: "button_clicked" event, objID
+objects.Button.click = function(self, x, y)
+  assert(self)
+  
+  local actionType = self.funcType
+  local param = self.param
+  
+  if (actionType == "switch") then
+    drawWindow(param)
+    return nil, nil
+  elseif (actionType == "function") then
+    if changeButtonColor then
+      objects.draw(self, objectColors.Button.active)
+    end
+    
+    if userFunctions[param] then
+      userFunctions[param]()
+    elseif editorFunctions[param] then
+      editorFunctions[param]()
+    end
+    
+    if changeButtonColor then
+      objects.draw(self, objectColors.Button.default)
+    else
+      changeButtonColor = true
+    end
+    
+    return "button_clicked", {self.objID}
+  end
+end
+
+-- >> Text
+objects.Text = {}
+objects.Text.new = function(self)
+  self.text = "Text"
+  self.width = #self.text
+  self.height = 1
+end
+
+objects.Text.get = function(self)
+  local width = #self.text
+  local buffer = Buffer:new()
+  buffer:init(width, 1, self.path)
+  buffer:addText(1, 1, self.text)
+  
+  return buffer
+end
+
+objects.Text.draw = function(self)
+  local x = self.x
+  local y = self.y
+  local text = self.text
+  out.setCursorPos(x, y)
+  out.write(text)
+end
+
+objects.Text.getDimensions = function(self)
+  local left, top, right, bottom = self.x, self.y, 1, self.y
+  right = left + string.len(self.text) - 1
+  return left, top, right, bottom
+end
+
+-- >> Variable
+objects.Variable = {}
+objects.Variable.new = function(self)
+  self.width = 1
+  self.height = 1
+end
+
+objects.Variable.get = function(self, value)
+  local buffer = Buffer:new()
+  
+  if value then
+    buffer:init(string.len(value), 1, self.path)
+    buffer:addText(1, 1, value)
+  else
+    buffer:init(1, 1, self.path)
+  end
+  
+  return buffer
+end
+
+-- >> Progress Bar
+objects.ProgressBar = {}
+objects.ProgressBar.new = function(self, maxWidth)
+  self.length = (maxWidth < size.ProgressBar.length) and maxWidth or size.ProgressBar.length
+  self.lengthPercent = maxX / self.length
+  self.width = self.length
+  self.height = 1
+  self.direction = "right"
+  self.objID = "newProgressBar"
+  self.canScale = true
+end
+
+objects.ProgressBar.get = function(self, value)
+  local length = self.length
+  local direction = (isValidDirection(self.direction)) and self.direction or "right"
+  local orientation = getOrientation(direction) or error("Direction " .. direction .. " is invalid!")
+  value = value or progressBarValues[self.objID]
+  
+  if (orientation == "horizontal") then
+    width, height = length, 1
+  else
+    width, height = 1, length
+  end
+  
+  local buffer = Buffer:new()
+  buffer:init(width, height, self.path, objectColors.ProgressBar.background)
+  
+  if value then
+    local color
+    if (value < 33) then
+      color = objectColors.ProgressBar.low
+    elseif (value > 66) then
+      color = objectColors.ProgressBar.high
+    else
+      color = objectColors.ProgressBar.medium
+    end
+    
+    local filled = math.floor((length / 100) * value)
+    local valueBuffer = objects.Line.get(getOrientation(direction), filled, color)
+    local addX, addY = 1, 1
+    
+    if (direction == "left") then
+      addX = width - filled
+    elseif (direction == "up") then
+      addY = height - filled
+    end
+    
+    buffer:addBuffer(addX, addY, valueBuffer)
+  end
+  
+  return buffer
+end
+
+objects.ProgressBar.getMovePos = function(self)
+  local dir = self.direction
+  local length = self.length
+  local x, y = self.absoluteX, self.absoluteY
+  
+  if (dir == "left") then
+    return x + length - 1, y
+  elseif (dir == "up") then
+    return x, y + length - 1
+  else
+    return x, y
+  end
+end
+
+objects.ProgressBar.getScalePos = function(self)
+  local dir = self.direction
+  local length = self.length
+  local x, y = self.absoluteX, self.absoluteY
+  
+  if (dir == "right") then
+    return x + length - 1, y
+  elseif (dir == "down") then
+    return x, y + length - 1
+  else
+    return x, y
+  end
+end
+-- Move and scale pos is wrong when the progress bar goes up.
+objects.ProgressBar.scale = function(self, x, y)
+  local moveX, moveY = objects.getMovePos(self)
+  local length
+  local newX, newY
+  local direction
+  local width, height
+  
+  if (x < moveX and y == moveY) then -- Clicked left of the progressBar.
+    length = moveX - x + 1
+    newX, newY = x, y
+    direction = "left"
+    width, height = length, 1
+  elseif (x == moveX and y < moveY) then -- Clicked above the progressBar.
+    length = moveY - y + 1
+    newX, newY = x, y
+    direction = "up"
+    width, height = 1, length
+  elseif (x > moveX and y == moveY) then -- Clicked right of the progressBar.
+    length = x - moveX + 1
+    direction = "right"
+    newX, newY = moveX, moveY
+    width, height = length, 1
+  elseif (x == moveX and y > moveY) then -- Clicked below the progressBar.
+    length = y - moveY + 1
+    direction = "down"
+    newX, newY = moveX, moveY
+    width, height = 1, length
+  else
     return
   end
   
-  local x = inputObject.x
-  local y = inputObject.y
-  local inputID = inputObject.inputID
-  local message = inputObject.message
-  local isPassword = (inputObject.isPassword == nil) and false or inputObject.isPassword
-  local maxLength = inputObject.maxLength
-  local existingInput = userInputs[inputID]
+  if (length > 2) then
+    self.absoluteX, self.absolutey = newX, newY
+    self.x, self.y = Path.getRelativePos(self.path, newX, newY)
+    self.direction = direction
+    self.width, self.height = width, height
+    self.length = length
+    self.lengthPercent = length / maxX
+  end
+end
+
+-- >> Input
+objects.Input = {}
+objects.Input.new = function(self)
+  self.message = "Enter something."
+  self.isPassword = false
+  self.width = 2
+  self.height = 1
+  self.canClick = true
+end
+
+objects.Input.get = function(self)
+  local userInput = userInputs[self.objID] or ""
+  local width, height = 2 + string.len(userInput), 1
   
-  out.setBackgroundColor(colors.black)
+  local buffer = Buffer:new()
+  buffer:init(width, height, self.path, objectColors.Input.default)
+  if userInput ~= "" then
+    buffer:addText(userInput)
+  end
+  
+  return buffer
+end
+
+-- Returns: "text_changed" event, objID, text
+objects.Input.click = function(self)
+  local x = self.x
+  local y = self.y
+  local objID = self.objID
+  local message = self.message
+  local isPassword = (self.isPassword == nil) and false or self.isPassword
+  local maxLength = self.maxLength
+  local existingInput = userInputs[objID]
+  
+  out.setBackgroundColor(objectColors.background)
   out.setCursorPos(x, y)
   if (existingInput ~= nil) then -- Clear the text on the input object.
-    for i = -1, string.len(existingInput) do
-      out.write(" ")
-    end
+    out.write(string.rep(" ", string.len(existingInput) + 2))
   else
     out.write("  ")
   end
-  userInputs[inputID] = nil
+  userInputs[objID] = nil
   
   out.setCursorPos(x, y)
   if not outIsTerm then
     -- make the input-object yellow
-    out.setBackgroundColor(colors.yellow)
+    out.setBackgroundColor(objectColors["Input"].active)
     out.write("  ")
-    out.setBackgroundColor(colors.black)
+    out.setBackgroundColor(objectColors.background)
   end
   
   if outIsTerm then
@@ -226,12 +1110,12 @@ function getUserInput(inputObject)
   
   local userInput = readUserInput(message, isPassword)
   if (userInput ~= nil) then
-    userInputs[inputID] = userInput
+    userInputs[objID] = userInput
   end
   
   out.setCursorPos(x, y)
-  out.setBackgroundColor(colors.white)
-  out.setTextColor(colors.black)
+  out.setBackgroundColor(objectColors.Input.default)
+  out.setTextColor(objectColors.Input.text)
   
   out.write(" ")
   if (userInput ~= nil and userInput ~= "") then
@@ -245,271 +1129,344 @@ function getUserInput(inputObject)
   end
   
   out.write(" ")
-  out.setBackgroundColor(colors.black)
-  out.setTextColor(colors.white)
+  out.setBackgroundColor(objectColors.background)
+  out.setTextColor(objectColors.text)
   
-  return ret
+  -- NOTE: Changed "return ret" to this one:
+  return "text_changed", {self.objID, userInput}
 end
 
--- Checks if dir is a valid direction-string
-function isValidDirection(dir)
-  if (dir ~= nil and
-     (dir == "left" or 
-      dir == "up" or 
-      dir == "right" or 
-      dir == "down")) then
-    return true
+-- >> List
+objects.List = {}
+objects.List.new = function(self)
+  self.elements = userLists.testList
+  self.objID = "testList"
+  self.isMultiselect = false
+  self.canClick = true
+end
+
+objects.List.get = function(self)
+  local buffer = Buffer:new()
+  local elements = self.elements or { "empty" }
+  
+  if (type(elements) == "string") then
+    elements = { [1]=self.elements }
   end
   
-  return false
-end
-
--- display objects region start --
-
--- Has to be used instead of paintutils.drawpixel
-function drawPixel(x, y, color)
-  out.setCursorPos(x, y)
-  out.setBackgroundColor(color)
-  out.write(" ")
-end
-
--- Displays a line at the given coordinates.
--- Didn't know that paintutils has a function that
--- does that for me...
-function showLine(x, y, direction, length, color)
-  out.setBackgroundColor(color)
-  
-  direction = (isValidDirection(direction)) and direction or "right"
-  local addX, addY = 1, 0
-  local currentX, currentY = x, y
-  
-  if (direction == "left") then
-    addX, addY = -1, 0
-  elseif (direction == "up") then
-    addX, addY = 0, -1
-  elseif (direction == "right") then
-    addX, addY = 1, 0
-  elseif (direction == "down") then
-    addX, addY = 0, 1
+  -- If there's a list which has this list's first element as its key.
+  if (#elements == 1 and userLists[elements[1]]) then
+    self.elements = userLists[self.elements[1]]
   end
   
-  for i = 1, length do
-    drawPixel(currentX, currentY, color)
-    currentX = currentX + addX
-    currentY = currentY + addY
+  elements = self.elements
+  
+  local width = getLongestString(elements) + 2
+  self.width = width
+  local height = #elements
+  self.height = height
+  local objID = self.objID
+  local isMultiselect = self.isMultiselect
+  if not selectedItems[objID] then
+    selectedItems[objID] = {}
   end
+  
+  buffer:init(width, height, self.path, objectColors.List.default)
+  
+  local line = 1
+  for key, element in pairs(elements) do
+    if (selectedItems[objID][key]) then
+      buffer:addBuffer(1, line, objects.Line.get("horizontal", width, objectColors.List.active))
+    end
+    buffer:addText(2, line, elements[line])
+    line = line + 1
+  end
+  
+  return buffer
 end
 
--- Displays a rectangle at the given coordinates.
-function showBox(x, y, width, height, color)
-  for row = x, x + width - 1 do
-    for col = y, y + height - 1 do
-      drawPixel(row, col, color)
+-- Returns: "selection_changed" event, objID, key, true or false
+objects.List.click = function(self, x, y)
+  local objID = self.objID
+  local isMultiselect = self.isMultiselect
+  local itemSelected = selectedItems[objID][y]
+  
+  if (isMultiselect) then
+    selectedItems[objID][y] = not itemSelected
+  else
+    selectedItems[objID] = {}
+    selectedItems[objID][y] = true
+  end
+  
+  objects.draw(self)
+  
+  return "selection_changed", {self.objID, y, selectedItems[objID][y]}
+end
+
+objects.List.getFirstSelectedKey = function(self)
+  local objID = self.objID
+  
+  for key, value in pairs(selectedItems[objID]) do
+    if (value == true) then
+      return key
     end
   end
   
-  out.setBackgroundColor(colors.black)
+  return nil
 end
 
--- Displays the text on the screen.
-function showText(textObject)
-  if (textObject.objType ~= "Text") then
-    return
-  end
+-- >> File Selector
+objects.FileSelector = {}
+objects.FileSelector.new = function(self)
+  self.width = string.len(text.fileSelector)
+  self.height = 1
+  self.isMultiselect = false
+  self.canClick = true
+end
+
+objects.FileSelector.draw = function(self)
+  local objectID = objectID
+  local x = self.x
+  local y = self.y
+  local isMultiselect = self.isMultiselect
   
-  x = textObject.x
-  y = textObject.y
-  text = textObject.text
-  assert(x, "Text: X-coordinate has to be set!")
-  assert(y, "Text: Y-coordinate has to be set!")
+  out.setBackgroundColor(objectColors["FileSelector"].default)
+  out.setTextColor(objectColors["FileSelector"].text)
   
   out.setCursorPos(x, y)
-  out.write(text)
-end
-
--- Displays the slider on the screen.
-function showSlider(slider, fillPercentage)
-  if (slider == nil or slider.objType ~= "Slider") then
-    return
-  end
+  out.write(text.fileSelector)
   
-  x = slider.x
-  y = slider.y
-  length = slider.length
-  direction = (isValidDirection(slider.direction)) and slider.direction or "right"
-  
-  startSymbol, endSymbol = "<", ">"
-  addX, addY = 1, 0 -- Sets the direction of the slider, therefore it could even be diagonal.
-  
-  if (direction == "left") then
-    addX, addY = -1, 0
-    startSymbol, endSymbol = ">", "<"
-    out.setCursorPos(x - length, y)
-    out.write(endSymbol)
-  elseif (direction == "up") then
-    addX, addY = 0, -1
-    startSymbol, endSymbol = "V", "^"
-    out.setCursorPos(x, y - length)
-    out.write(endSymbol)
-  elseif (direction == "right") then
-    addX, addY = 1, 0
-    startSymbol, endSymbol = "<", ">"
-    out.setCursorPos(x + length, y)
-    out.write(endSymbol)
-  elseif (direction == "down") then
-    addX, addY = 0, 1
-    startSymbol, endSymbol = "^", "V"
-    out.setCursorPos(x, y + length)
-    out.write(endSymbol)
-  else -- return if it's not a valid direction, even if I checked it before
-    return
-  end
-  
-  out.setCursorPos(x, y)
-  out.write(startSymbol)
-  
-  if (fillPercentage ~= nil) then
-    if (fillPercentage < 33) then
-      sliderColor = sliderLowValueColor
-    elseif (fillPercentage > 66) then
-      sliderColor = sliderHighValueColor
-    else
-      sliderColor = sliderMediumValueColor
-    end
-    
-    filled = math.floor((length / 100) * fillPercentage)
-    showLine(x + addX, y + addY, direction, filled, sliderColor)
-  end
-  
-  out.setBackgroundColor(colors.black)
-end
-
--- Displays the given button on the screen.
-function showButton(button, color)
-  if (button == nil or button.objType ~= "Button") then
-    return
-  end
-  
-  x = button.x
-  y = button.y
-  width = button.width
-  height = button.height
-  text = button.text
-  
-  showBox(x, y, width, height, color)
-  
-  -- Tries to center the text in the button.
-  textCol = x + math.floor((width - string.len(text)) / 2)
-  textRow = y + math.ceil(height / 2) - 1
-  out.setCursorPos(textCol, textRow)
-  out.setBackgroundColor(color)
-  out.write(text)
-  
-  out.setBackgroundColor(colors.black)
-end
-
--- Displays the input-object (two white spaces)
-function showInput(inputObject)
-  if (inputObject == nil or inputObject.objType ~= "Input") then
-    return
-  end
-  
-  local inputID = inputObject.inputID
-  local x = inputObject.x
-  local y = inputObject.y
-  
-  out.setCursorPos(x, y)
-  out.setBackgroundColor(inputDefaultColor)
-  out.setTextColor(inputDefaultTextColor)
-  out.write(" ")
-  out.write(userInputs[inputID])
-  out.write(" ")
-  
-  out.setTextColor(colors.white)
-  out.setBackgroundColor(colors.black)
-end
-
--- Used by "showList" and "showSelector" to
--- determine how wide the list should be.
-function getLongestString(stringArray)
-  if (stringArray == nil or #stringArray == 0) then
-    return 0
-  end
-  
-  ret = 0
-  
-  for key, value in pairs(stringArray) do
-    length = string.len(value)
-    if (length > ret) then
-      ret = length
-    end
-  end
-  
-  return ret
-end
-
--- Displays a list on the monitor.
-function showList(listObject)
-  if (listObject == nil or listObject.objType ~= "List") then
-    return
-  end
-  
-  if (type(listObject.elements) == "string") then
-    listObject.elements = { listObject.elements }
-  end
-  
-  if (#listObject.elements == 1 and userLists[listObject.elements[1]] ~= nil) then
-    listObject.elements = userLists[listObject.elements[1]]
-  end
-  
-  x = listObject.x
-  y = listObject.y
-  elements = (listObject.elements ~= nil) and listObject.elements or { "empty" }
-  width = getLongestString(elements) + 2
-  listObject.width = width
-  height = #elements
-  listObject.height = height
-  elements = listObject.elements
-  listID = listObject.listID
-  isMultiselect = (listObject.isMultiselect ~= nil) and listObject.isMultiselect or false
-  
-  showBox(x, y, width, height, listDefaultColor)
-  
-  if (selectedItems[listID] == nil and isMultiselect) then
-    selectedItems[listID] = {  }
-    for index, elementKey in ipairs(elements) do
-      selectedItems[listID][elementKey] = false
-    end
-  end
-  
-  posY = 0
-  for key,element in pairs(elements) do
-    out.setCursorPos(x, y + posY)
-    
-    if (isMultiselect) then
-      if (selectedItems[listID][key] == true) then
-        out.setBackgroundColor(listSelectedColor)
-      else
-        out.setBackgroundColor(listDefaultColor)
+  if (selectedFiles[objectID] ~= nil) then
+    out.setBackgroundColor(objectColors.background)
+    out.setTextColor(objectColors.text)
+    local files = selectedFiles[objectID]
+    out.write(" ")
+    if (type(files) == "table") then
+      local sep = ""
+      for _, fileName in pairs(files) do
+        term.write(sep .. fileName)
+        sep = ", "
       end
     else
-      if (selectedItems[listID] == key) then
-        out.setBackgroundColor(listSelectedColor)
-      else
-        out.setBackgroundColor(listDefaultColor)
-      end
+      out.write(files)
     end
-    
-    out.write(" " .. element .. " ")
-    posY = posY + 1
   end
   
-  out.setBackgroundColor(colors.black)
+  out.setBackgroundColor(objectColors.background)
+  out.setTextColor(objectColors.text)
 end
 
--- Displays a list and returns the field that the
--- user touched.
-function showSelector(x, y, elements)
+objects.FileSelector.click = function(self, x, y)
+error("Not yet implemented")
+-- TODO
+  local finished = false
+  local path = "/"
+  local list = {}
+  
+  while not finished do
+    clearScreen()
+    out.setCursorPos(2, 1)
+    out.write("Path: " .. path)
+    
+    list = getFileList(path)
+    
+    out.setTextColor(objectColors.FileSelector.text)
+  end
+end
+
+-- >>> Containers
+
+objects.Container = {}
+
+objects.Container.getNextFreeKey = function(self)
+  local nextKey = 1
+  
+  while self.children[nextKey] ~= nil do
+    nextKey = nextKey + 1
+  end
+  
+  return nextKey
+end
+
+-- Returns the area of the container which stores
+-- its children.
+objects.Container.getContentArea = function(self)
+  assert(self)
+  local objType = self.objType
+  
+  if (objects.Container[objType].getContentArea) then
+    return objects.Container[objType].getContentArea(self)
+  else
+    local left = self.x + 1
+    local top = self.y + 1
+    local right = self.x + self.width - 2
+    local bottom = self.y + self.height - 2
+    return left, top, right, bottom
+  end
+end
+
+-- Determines whether the container itself or its
+-- content area is at the given position.
+objects.Container.contentAreaClicked = function(self, x, y)
+  local left, top, right, bottom = objects.Container.getContentArea(self)    
+  
+  return (x >= left and x <= right and y >= top and y <= bottom)
+end
+
+-- Draws the buffer and trims it before if
+-- necessary.
+objects.Container.drawBuffer = function(self, buffer, path, x, y, absoluteX, absoluteY, nestLevel)
+  if (self.objType ~= "Window") then
+    local containerLeft, containerTop, containerRight, containerBottom = 1, 1, self.width - 1, self.height - 1
+    local objLeft, objTop, objRight, objBottom = x, y, x + buffer.width - 1, y + buffer.height - 1
+    if (objLeft > self.width or
+        objTop > self.height or
+        objRight < 0 or
+        objBottom < 0) then
+      return
+    elseif (objLeft < containerLeft or objTop < containerTop or objRight > containerRight or objBottom > containerBottom) then
+      local trimLeft = (containerLeft - objLeft) > 0 and containerLeft - objLeft or 0
+      local trimTop = (containerTop - objTop) > 0 and containerTop - objTop or 0
+      local trimRight = (objRight - containerRight + 1) > 0 and objRight - containerRight + 1 or 0
+      local trimBottom = (objBottom - containerBottom + 1) > 0 and objBottom - containerBottom + 1 or 0
+      buffer = buffer:trim(trimLeft, trimTop, trimRight, trimBottom)
+      
+      if (trimLeft > 0) then
+        x = x + trimLeft
+        absoluteX = absoluteX + trimLeft
+      end
+      if (trimTop > 0) then
+        y = y + trimTop
+        absoluteY = absoluteY + trimTop
+      end
+    end
+  end
+  
+  if (nestLevel < #path - 1) then
+    local container = Path.getContainerAt(path, nestLevel + 1)
+    local relX, relY = objects.Container.getRelativePos(container, x, y)
+    objects.Container.drawBuffer(container, buffer, path, relX, relY, absoluteX, absoluteY, nestLevel + 1)
+  else
+    buffer:draw(absoluteX, absoluteY)
+  end
+end
+
+objects.Container.getRelativePos = function(self, x, y)
+  local left, top, right, bottom = objects.Container.getContentArea(self)
+  
+  retX = x - left + 1
+  retY = y - top + 1
+  
+  return retX, retY
+end
+
+objects.Container.getParentsRelativePos = function(self, x, y)
+  local left, top, right, bottom = objects.Container.getContentArea(self)
+  
+  return x + left - 1, y + top - 1
+end
+
+objects.Container.new = function(self, maxWidth, maxHeight)
+  local defaultWidth, defaultHeight = size.Container.width, size.Container.height
+  
+  self.isContainer = true
+  self.canScale = true
+  self.children = {}
+  self.width = (maxWidth < defaultWidth) and maxWidth or defaultWidth
+  self.height = (maxHeight < defaultHeight) and maxHeight or defaultHeight
+  
+  if (objects.Container[self.objType].new) then
+    objects.Container[objectType].new(object)
+  end
+end
+
+objects.Container.get = function(self)
+  local left, top, right, bottom = objects.Container.getContentArea(self)
+  local width, height = right - left + 1, bottom - top + 1
+  local buffer = Buffer:new()
+  buffer:init(width, height, {})
+  
+  for objectID, object in pairs(self.children) do
+    local objectBuffer = objects.get(object)
+    buffer:addBuffer(object.x, object.y, objectBuffer)
+  end
+  
+  return objects.Container[self.objType].get(self, buffer)
+end
+
+objects.Container.move = function(self, addX, addY)
+  self.absoluteX = self.absoluteX + addX
+  self.absoluteY = self.absoluteY + addY
+  
+  for _, child in pairs(self.children) do
+    if child.isContainer then
+      objects.Container.move(child, addX, addY)
+    else
+      child.absoluteX = child.absoluteX + addX
+      child.absoluteY = child.absoluteY + addY
+    end
+  end
+end
+
+-- >> Window
+
+objects.Container.Window = {}
+objects.Container.Window.new = function(windowName)
+  local object = {}
+  object.objType = "Window"
+  object.parent = "mainWindow"
+  object.children = {}
+  object.width, object.height = maxX, maxY
+  
+  return object
+end
+
+objects.Container.Window.create = function(windowName)
+  local object = objects.Container.Window.new(windowName)
+  windows.children[windowName] = object
+end
+
+objects.Container.Window.get = function(self, contentBuffer)
+  return contentBuffer
+end
+
+objects.Container.Window.getContentArea = function(self)
+  return 1, 1, maxX, maxY
+end
+
+-- >> Panel
+
+objects.Container.Panel = {}
+objects.Container.Panel.get = function(self, contentBuffer)
+  local buffer = Buffer:new()
+  buffer:init(self.width, self.height, self.path, objectColors.Container.Panel.border)
+  buffer:addBuffer(2, 2, contentBuffer)
+  
+  return buffer
+end
+
+-- >>> Objects that can't be added by the user.
+
+-- >> Line
+
+objects.Line = {}
+objects.Line.get = function(orientation, length, color)
+  if (orientation ~= "horizontal" and orientation ~= "vertical") then
+    orientation = getOrientation(orientation) or error("Orientation " .. orientation .. " is invalid!")
+  end
+  
+  assert(length)
+  assert(color)
+  
+  local width, height = (orientation == "horizontal") and length, 1 or 1, length
+  local buffer = Buffer:new()
+  buffer:init(width, height, nil, color)
+  
+  return buffer
+end
+
+-- >> Editor objects
+objects.Selector = {}
+objects.Selector.draw = function(x, y, elements)
   width = getLongestString(elements) + 2
   height = #elements + 2 -- Elements + up and down
   elementCount = #elements
@@ -577,7 +1534,7 @@ function showSelector(x, y, elements)
     end
   end
   
-  out.setBackgroundColor(colors.black)
+  out.setBackgroundColor(objectColors.background)
   
   -- Read the user input.
   scroll = 1
@@ -587,9 +1544,9 @@ function showSelector(x, y, elements)
   finished = false
   while not finished do
     -- Display the actual selector.
-    showBox(x, y, width, height, listDefaultColor)
+    drawBox(x, y, width, height, objectColors.List.default)
     
-    out.setBackgroundColor(listDefaultColor)
+    out.setBackgroundColor(objectColors["List"].default)
     middle = math.floor(width / 2)
     out.setCursorPos(x + middle, y)
     out.write("^")
@@ -600,7 +1557,7 @@ function showSelector(x, y, elements)
       out.setCursorPos(x, y + i)
       out.write(" " .. elements[i + scroll - 1] .. " ")
     end
-    out.setBackgroundColor(colors.black)
+    out.setBackgroundColor(objectColors.background)
     
     touchX, touchY, mouseButton = getCursorInput()
     
@@ -627,27 +1584,269 @@ function showSelector(x, y, elements)
     end
   end
   
-  showScreen(currentScreen)
+  drawWindow(currentWindow)
   return result
 end
 
--- Displays the text with red background colour.
-function showSimpleButton(x, y, text)
-  out.setCursorPos(x, y)
-  out.setBackgroundColor(colors.red)
-  out.write(text)
-  out.setBackgroundColor(colors.black)
+-- >> API Functions
+
+-- API function: Sets the value of all variables
+-- with the given ID.
+function setVariableValue(variableID, newVar)
+  variableValues[variableID] = newVar
 end
 
--- Displays the "Back"- and "Refresh"-Buttons
-function showDefaultButtons()
-  x = maxX - string.len(refreshText) + 1
-  showSimpleButton(x, maxY, refreshText)
+-- API function: Sets the value of all progressBars
+-- with the given ID.
+function setProgressBarValue(objID, newVar)
+  progressBarValues[objID] = newVar
+end
+
+-- >> User Input Functions
+
+-- Gets any input of the user
+-- (not from the environment)
+function getAnyInput()
+  local finished = false
+  local event = {}
   
-  showSimpleButton(1, maxY, backText)
+  while not finished do
+    finished = true
+    os.sleep(0)
+    
+    input = {os.pullEvent()}
+    event.eventType = input[1]
+    
+    if (event.eventType == "monitor_touch" and not outIsTerm) then
+      event.eventType = "mouse"
+      event.x = input[3]
+      event.y = input[4]
+      event.mouseButton = 1
+    elseif (event.eventType == "mouse_click" and outIsTerm) then
+      event.eventType = "mouse"
+      event.x = input[3]
+      event.y = input[4]
+      event.mouseButton = input[2]
+    elseif (event.eventType == "key") then
+      event.key = input[2]
+    else
+      finished = false
+    end
+  end
+  
+  return event
 end
 
--- display objects region end
+-- Returns where the user clicked and which button
+-- he pressed (always 1 if it's a monitor).
+function getCursorInput()
+  local finished = false
+  
+  while not finished do
+    event, param, x, y = os.pullEvent()
+    
+    if (event == "monitor_touch" and not outIsTerm) then
+      mouseButton = 1
+      finished = true
+    elseif (event == "mouse_click" and outIsTerm) then
+      mouseButton = param
+      finished = true
+    end
+  end
+  
+  return x, y, mouseButton
+end
+
+-- Waits until any key gets pressed.
+function getKeyInput()
+  os.pullEvent("key")
+end
+
+function readUserInput(message, isPassword)
+  if not outIsTerm then
+    print(message)
+  end
+    
+  if isPassword  then
+    ret = read("*")
+  else
+    ret = read()
+  end
+  
+  return ret
+end
+
+-- >> Display Functions
+
+-- Has to be used instead of paintutils.drawpixel
+function drawPixel(x, y, color)
+  out.setCursorPos(x, y)
+  out.setBackgroundColor(color)
+  out.write(" ")
+end
+
+function drawBox(x, y, width, height, color)
+  out.setBackgroundColor(color)
+  
+  for row = 1, height do
+    out.setCursorPos(x, y + row - 1)
+    out.write(string.rep(" ", width))
+  end
+end
+
+-- Displays the text with red background colour.
+function drawSimpleButton(x, y, text)
+  out.setCursorPos(x, y)
+  out.setBackgroundColor(objectColors.Button.default)
+  out.write(text)
+  out.setBackgroundColor(objectColors.background)
+end
+
+-- Displays the default buttons.
+function drawDefaultButtons()
+  local window = getCurrentWindow()
+  local button
+  
+  if (window.showRefreshButton) then
+    button = defaultButtons.refresh
+    drawSimpleButton(button.left, button.top, button.text) -- Refresh
+  end
+  
+  if (window.showBackButton and currentWindow ~= "mainWindow") then
+    button = defaultButtons.back
+    drawSimpleButton(button.left, button.top, button.text) -- Back
+  end
+  
+  button = defaultButtons.quit
+  drawSimpleButton(button.left, button.top, button.text) -- Quit
+  
+  button = defaultButtons.options
+  if (button.required()) then
+    drawSimpleButton(button.left, button.top, button.text) -- Options
+  end
+end
+
+-- Loads the values of all variables and progressBars
+-- of the current window.
+function loadObjects()
+  local window = getCurrentWindow()
+  for objectID, object in pairs(window.children) do
+    local objectType = object.objType
+    
+    if (objectType == "Variable" or objectType == "ProgressBar") then
+      local x = object.absoluteX
+      local y = object.absoluteY
+      local value = nil
+      
+      if (objectType == "Variable") then
+        value = getVariableValue(object)
+      elseif (objectType == "ProgressBar") then
+        value = getProgressBarValue(object)
+      end
+      
+      objects.draw(object, value)
+    end
+  end
+end
+
+-- Displays all objects of the window with the
+-- ID windowID on the screen and changes the
+-- variable "currentWindow".
+function drawWindow(windowID)
+  clearScreen()
+  
+  if windowID then
+    currentWindow = windowID
+  else
+    windowID = currentWindow
+  end
+  
+  local windowObject = getCurrentWindow()
+  
+  windowBuffer = objects.Container.get(windowObject)
+  windowBuffer:draw()
+  
+  if autoLoadObjects then
+    loadObjects()
+  end
+  
+  text.refresh = editMode and "Options" or "Refresh"
+  drawDefaultButtons()
+end
+
+-- >> Input Processing
+
+function pullEvent(requestedEvent)
+  if not eventTypeExists(requestedEvent) then
+    clearScreen()
+    print("Event type " .. tostring(requestedEvent) .. " is invalid!")
+    print()
+    print("Available event types:")
+    
+    for _, event in pairs(eventTypes) do
+      print("  " .. event)
+    end
+    
+    error()
+  end
+  
+  local finished = false
+  local event, params
+  
+  while not finished do
+    event, params = getInput()
+    
+    if event then
+      if (requestedEvent ~= nil) then
+        if (requestedEvent == event or event == "quit") then
+          finished = true
+        end
+      else
+        finished = true
+      end
+    end
+  end
+  
+  return event, unpack(params)
+end
+
+function getInput()
+  local finished = false
+  local event, params
+  local x, y, mouseButton = getCursorInput()
+
+  if (defaultButtonPressed("quit", x, y)) then
+    quit = true
+  elseif (defaultButtonPressed("refresh", x, y)) then
+    drawWindow()
+    finished = true
+  elseif (defaultButtonPressed("back", x, y)) then
+    if (windows.children[currentWindow].parent ~= nil) then
+      drawWindow(windows.children[currentWindow].parent)
+      finished = true
+    else
+      drawWindow("mainWindow")
+      finished = true
+    end
+  end
+  
+  if finished then
+    return nil
+  elseif quit then
+    return "quit", { "Graffiti" } -- Used for the API
+  end
+  
+  local param
+  local path = windowBuffer.bufferTable[x][y].path
+  if path and #path > 0 then
+    local object = Path.getObject(path)
+    local clickX, clickY = Path.getRelativePos(path, x, y)
+    clickX, clickY = x - object.x + 1, y - object.y + 1
+    event, params = objects.click(object, clickX, clickY)
+  end
+  
+  return event, params
+end
 
 -- Returns a table with most informations that an AddOn would need.
 function getSystemInfo()
@@ -658,176 +1857,6 @@ function getSystemInfo()
   systemInfo.userInputs = userInputs
   
   return systemInfo
-end
-
--- Loads the values of all variables and sliders
--- of the current screen.
-function loadObjects()
-  for objectID, object in pairs(screens[currentScreen]) do
-    local objectType = object.objType
-    local x = object.x
-    local y = object.y
-    
-    if (objectType == "Variable") then
-      local value = getVariableValue(object.varID)
-      out.setCursorPos(x, y)
-      out.write(value)
-    elseif (objectType == "Slider") then
-      local length = object.length
-      local value = getSliderValue(object.sliderID)
-      showSlider(object, value)
-    end
-  end
-end
-
--- Displays all objects of the selected screen.
-function showScreen(screenID)
-  out.clear()
-  
-  assert(screenID, "Can't show screen! Parameter screenID is invalid!")
-  currentScreen = screenID
-  
-  if not editMode then
-    if (currentScreen == "mainScreen") then
-      backText = "Quit"
-    else
-      backText = "Back"
-    end
-  else
-    backText = "Quit"
-    refreshText = "Options"
-  end
-  
-  local screenObject
-  local objectType
-  if showEditorOptions then
-    screenObject = editorScreens[screenID]
-  else
-    screenObject = screens[screenID]
-  end
-  
-  for sObjectID, sObject in pairs(screenObject) do
-    objectType = sObject.objType
-    
-    if (objectType == "Button") then
-      showButton(sObject, buttonDefaultColor)
-    elseif (objectType == "Text") then
-      showText(sObject)
-    elseif (objectType == "Slider") then
-      showSlider(sObject, 0)
-    elseif (objectType == "Input") then
-      showInput(sObject)
-    elseif (objectType == "List") then
-      showList(sObject)
-    elseif (objectType == "Custom") then
-      callAddOn(sObject, "Show")
-    end
-  end
-  
-  if autoLoadObjects then
-    loadObjects()
-  end
-  
-  showDefaultButtons()
-  
-  out.setCursorPos(1, maxY)
-end
-
--- Waits until the user touches the monitor and
--- if he touched a button, the function stored in
--- it will be called.
-function getInput()
-  local finished = false
-  x, y, mouseButton = getCursorInput()
-  
-  if (y == maxY) then -- Checking the default buttons
-    if (x <= string.len(backText)) then -- "Back"-Button pressed
-      if (currentScreen == "mainScreen" or editMode) then
-        quit = true
-      else
-        if (screens[currentScreen].parentScreen ~= nil) then
-          showScreen(screens[currentScreen].parentScreen)
-          finished = true
-        else
-          showScreen("mainScreen")
-          finished = true
-        end
-      end
-    elseif (x >= maxX - string.len(refreshText) and not editMode) then -- "Refresh"-Button pressed
-      showScreen(currentScreen)
-      finished = true
-    end
-  end
-  
-  if finished then
-    return nil, currentScreen
-  elseif quit then
-    return "quit", currentScreen -- Used for the API
-  end
-  
-  local param, screen
-  local sObjectID, sObject = findObject(x, y)
-  if (sObjectID ~= nil and sObject ~= nil) then
-    objectType = sObject.objType
-    
-    if (objectType == "Button") then
-      if (sObject.isAddon) then
-        callAddOn(sObject, "Click")
-      elseif (sObject.funcType ~= nil and sObject.param ~= nil) then
-        param, screen = callAction(sObject)
-      end
-    elseif (objectType == "Input") then
-      getUserInput(sObject)
-    elseif (objectType == "List") then
-      top = sObject.y
-      listID = sObject.listID
-      isMultiselect = sObject.isMultiselect
-      
-      if (isMultiselect) then
-        if (selectedItems[listID][y - top + 1]) then
-          selectedItems[listID][y - top + 1] = false
-        else
-          selectedItems[listID][y - top + 1] = true
-        end
-      else
-        selectedItems[listID] = y - top + 1
-      end
-      
-      showList(sObject)
-    elseif (objectType == "Custom" and sObject.canClick) then -- AddOn Object
-      callAddOn(sObject, "Click")
-    end
-  end
-  
-  return param, screen
-end
-
-function callAction(button)
-  actionType = button.funcType
-  param = button.param
-  
-  if (actionType == "switch") then
-    showScreen(param)
-    return nil, param
-  elseif (actionType == "function") then
-    if changeButtonColor then
-      showButton(button, buttonPressedColor)
-    end
-    
-    if userFunctions[param] ~= nil then
-      userFunctions[param]()
-    elseif editorFunctions[param] ~= nil then
-      editorFunctions[param]()
-    end
-    
-    if changeButtonColor then
-      showButton(button, buttonDefaultColor)
-    else
-      changeButtonColor = true
-    end
-    
-    return param, currentScreen
-  end
 end
 
 function callAddOn(object, callType)
@@ -846,39 +1875,15 @@ function callAddOn(object, callType)
   systemInfo.height = height
   
   if changeButtonColor then
-      showButton(object, buttonPressedColor)
+      objects["Button"].draw(object, objectColors["Button"].active)
   end
   
   shell.run(addOnPath, callType, objectID, textutils.serialize(systemInfo))
   
   if changeButtonColor then
-    showButton(button, buttonDefaultColor)
+    objects["Button"].draw(button, objectColors["Button"].default)
   else
     changeButtonColor = true
-  end
-end
-
--- Checks if the monitor on monitorSide exists and wraps it into "monitor".
-function getOutput()
-  if (monitor == nil and outIsTerm == false) then
-    local monitorFound = false
-    for _, side in pairs(sides) do
-      if (peripheral.getType(side) == "monitor") then
-        monitor = peripheral.wrap(side)
-        monitorFound = true
-        out = monitor
-        outIsTerm = false
-      end
-    end
-    
-    if not monitorFound then
-      out = term
-      outIsTerm = true
-    end
-  elseif outIsTerm then
-    out = term
-  else
-    out = monitor
   end
 end
 
@@ -893,23 +1898,23 @@ end
 
 -- Calls the "getInput" function until the user presses the quit-button.
 function main()
-  showScreen("mainScreen")
+  drawWindow("mainWindow")
   
   while not quit do
     getInput()
   end
 end
 
--- Saves the content of the screens-table into the save file
-function saveScreens()
-  saveString = textutils.serialize(screens)
+-- Saves the content of the windows-table into the save file
+function saveWindows()
+  saveString = textutils.serialize(windows.children)
   file = fs.open(saveFileName, "w")
   file.write(saveString)
   file.close()
 end
 
--- Loads the save file and puts the content into the screens-table
-function loadScreens()
+-- Loads the save file and puts the content into the windows-table
+function loadWindows()
   if not fs.exists(saveFileName) then
     return
   end
@@ -917,25 +1922,25 @@ function loadScreens()
   file = fs.open(saveFileName, "r")
   loadString = file.readAll()
   if (loadString ~= nil and loadString ~= "") then
-    screens = textutils.unserialize(loadString)
+    windows.children = textutils.unserialize(loadString)
   end
   file.close()
 end
 
-function splitAt(toSplit, delimiter)
-  delimiterPos = string.find(toSplit, delimiter)
-  left = string.sub(toSplit, 1, delimiterPos - 1)
-  right = string.sub(toSplit, delimiterPos + #delimiter)
+function splitAt(self, delimiter)
+  delimiterPos = string.find(self, delimiter)
+  left = string.sub(self, 1, delimiterPos - 1)
+  right = string.sub(self, delimiterPos + #delimiter)
   
   return left, right
 end
 
--- screen editor region start --
+-- >>> Editor
 
-function generateScreenList()
-  ret = { "mainScreen" }
-  for key, value in pairs(screens) do
-    if (key ~= "mainScreen" and key ~= "defaultX" and key ~= "defaultY") then
+function generateWindowList()
+  ret = { "mainWindow" }
+  for key, value in pairs(windows.children) do
+    if (key ~= "mainWindow") then
       table.insert(ret, key)
     end
   end
@@ -943,252 +1948,178 @@ function generateScreenList()
   return ret
 end
 
-editorScreens = {
-  mainScreen = {
-    { objType="Text", x=2, y=1, text="Mode:" };
-    { objType="List", x=2, y=2, elements=editActions, listID="editActionList", isMultiselect=false };
-    { objType="Button", x=2, y=6, width=14, height=1, text="last screen", funcType="function", param="editLastScreen" };
-    { objType="Button", x=2, y=8, width=14, height=1, text="edit screens", funcType="function", param="loadScreenList" };
-  };
-  
-  screenListScreen = {
-    { objType="List", x=2, y=2, elements=screenList, listID="screenList", isMultiselect=false };
-    { objType="Button", x=2, y=maxY-6, width=12, height=1, text="Set parent", funcType="function", param="setParent" };
-    { objType="Button", x=2, y=maxY-4, width=8, height=1, text="New", funcType="function", param="newScreen" };
-    { objType="Button", x=2, y=maxY-3, width=8, height=1, text="Edit", funcType="function", param="editScreen" };
-    { objType="Button", x=2, y=maxY-2, width=8, height=1, text="Delete", funcType="function", param="deleteScreen" };
+editorWindows = {
+  children = {
+    mainWindow = {
+      objType = "Window",
+      children = {
+        [1] = { objType="Text", x=2, y=1, text="Mode:", path={1} };
+        [2] = { objType="List", x=2, y=3, elements=editActions, objID="editActionList", isMultiselect=false, canClick=true, path={2} };
+        [3] = { objType="Button", x=2, y=7, width=13, height=3, text="Last Window", funcType="function", param="editLastWindow", canClick=true, canScale=true, path={3} };
+        [4] = { objType="Button", x=17, y=7, width=13, height=3, text="Window List", funcType="function", param="loadWindowList", canClick=true, canScale=true, path={4} };
+      };
+    };
+    
+    windowListWindow = {
+      objType = "Window",
+      children = {
+        [1] = { objType="List", x=2, y=2, elements=windowList, objID="windowList", isMultiselect=false, canClick=true, path={1} };
+        [2] = { objType="Button", x=2, y=maxY-6, width=12, height=1, text="Set parent", funcType="function", param="setParent", canClick=true, canScale=true, path={2} };
+        [3] = { objType="Button", x=2, y=maxY-4, width=8, height=1, text="New", funcType="function", param="newWindow", canClick=true, canScale=true, path={3} };
+        [4] = { objType="Button", x=2, y=maxY-3, width=8, height=1, text="Edit", funcType="function", param="editWindow", canClick=true, canScale=true, path={4} };
+        [5] = { objType="Button", x=2, y=maxY-2, width=8, height=1, text="Delete", funcType="function", param="deleteWindow", canClick=true, canScale=true, path={5} };
+      };
+    };
   };
 }
 
--- Used to give a List-object an array of all screens
-function editorFunctions.loadScreenList()
-  screenList = generateScreenList()
-  editorScreens["screenListScreen"][1].elements = screenList
+-- Used to give a List-object an array of all windows
+function editorFunctions.loadWindowList()
+  windowList = generateWindowList()
+  editorWindows.children.windowListWindow.children[1].elements = windowList
   changeButtonColor = false
-  showScreen("screenListScreen")
+  drawWindow("windowListWindow")
 end
 
-function editorFunctions.editLastScreen()
-  if (lastScreen == nil) then
-    lastScreen = "mainScreen"
+function editorFunctions.editLastWindow()
+  if (lastWindow == nil) then
+    lastWindow = "mainWindow"
   end
   
   showEditorOptions = false
-  showScreen(lastScreen)
+  drawWindow(lastWindow)
   changeButtonColor = false
 end
 
--- Let's the user define the parentScreen-attribute of the current screen.
+-- Let's the user define the parent-attribute of the current window.
 function editorFunctions.setParent()
-  if (selectedItems.screenList == nil) then
+  if (selectedItems.windowList == nil) then
     return
   end
   
-  list = editorScreens.screenListScreen[1]
-  height = list.height
-  for i = 1, height do
-    if (selectedItems.screenList ~= i) then
-      drawPixel(1, i + 1, colors.lime)
+  local list = editorWindows.children.windowListWindow.children[1]
+  local selected = objects.List.getFirstSelectedKey(list)
+  
+  for i = 1, list.height do
+    if (i ~= selected) then
+      if (windowList[i] == windows.children[windowList[selected]].parent) then
+        drawPixel(1, i + 1, colors.yellow)
+      else
+        drawPixel(1, i + 1, colors.lime)
+      end
     end
   end
   
-  x, y, mouseButton = getCursorInput()
+  local x, y, mouseButton = getCursorInput()
+  local selectedParent = y - list.y + 1
   
-  if (y > 1 and y <= height + 1) then -- Clicked inside the list.
-    if (y - 1 ~= selectedItems.screenList) then -- Selected parentScreen is not selected screen.
-      screens[list.elements[selectedItems.screenList]].parentScreen = list.elements[y - 1]
+  if (selectedParent >= 1 and selectedParent <= list.height) then -- Clicked inside the list.
+    if (selectedParent ~= selected) then -- Selected parentWindow is not selected window.
+      windows.children[windowList[selected]].parent = windowList[selectedParent]
     end
   end
   
-  for i = 1, height do
-    drawPixel(1, i + 1, colors.black)
+  for i = 1, list.height do
+    drawPixel(1, i + list.y - 1, colors.black)
   end
 end
 
--- Creates a new screen. The user has to enter the screen name in the computer.
-function editorFunctions.newScreen()
-  out.clear()
+-- Creates a new window. The user has to enter the window name in the computer.
+function editorFunctions.newWindow()
+  clearScreen()
+  
   if not outIsTerm then
     out.setCursorPos(2, 2)
-    out.write("Enter a screen-name.")
+    out.write("Enter a window-name.")
   end
   
   out.setCursorPos(1, 1)
   
-  message = "Pleas enter the name of the new screen."
+  message = "Pleas enter the name of the new window or nothing to cancel."
   userInput = readUserInput(message, false)
   
-  while (userInput ~= nil and screens[userInput] ~= nil) do
-    message = "There is already a screen with that name!"
+  while (userInput ~= nil and userInput ~= "" and windows.children[userInput] ~= nil) do
+    message = "There is already a window with that name!"
     userInput = readUserInput(message, false)
   end
   
-  if (userInput ~= nil) then
-    screens[userInput] = { parentScreen="mainScreen" }
+  if (userInput ~= nil and userInput ~= "") then
+    objects.Container.Window.create(userInput)
     showEditorOptions = false
-    showScreen(userInput)
-    lastScreen = userInput
+    drawWindow(userInput)
+    lastWindow = userInput
     changeButtonColor = false
   end
 end
 
--- Edits the screen that has been selected in the "screenList"-list.
-function editorFunctions.editScreen()
-  if (selectedItems.screenList ~= nil) then
+-- Edits the window that has been selected in the "windowList"-list.
+function editorFunctions.editWindow()
+  if selectedItems.windowList then
+    local list = editorWindows.children.windowListWindow.children[1]
+    local key = objects.List.getFirstSelectedKey(list)
+    key = key or 1
+    
     showEditorOptions = false
-    lastScreen = screenList[selectedItems.screenList]
-    showScreen(screenList[selectedItems.screenList])
+    lastWindow = windowList[key]
+    drawWindow(lastWindow)
     changeButtonColor = false
   end
 end
 
--- Deletes the screen that has been selected in the "screenList"-list.
-function editorFunctions.deleteScreen()
-  if (selectedItems.screenList ~= nil and screenList[selectedItems.screenList] ~= "mainScreen") then
-    screens[screenList[selectedItems.screenList]] = nil
+-- Deletes the window that has been selected in the "windowList"-list.
+function editorFunctions.deleteWindow()
+  local list = editorWindows.children.windowListWindow.children[1]
+  local key = objects.List.getFirstSelectedKey(list)
+  
+  if (key and windowList[key] ~= "mainWindow") then
+    windows.children[windowList[key]] = nil
     showEditorOptions = true
-    editorFunctions.loadScreenList()
+    editorFunctions.loadWindowList()
   end
-end
-
--- Displays an object with default attributes and adds it to the current screen.
-function showDefaultObject(objectType, xCoord, yCoord)
-  object = {  }
-  
-  object.objType = objectType
-  object.x = xCoord
-  object.y = yCoord
-  object.xPercent = maxX / xCoord
-  object.yPercent = maxX / yCoord
-  
-  maxWidth = maxX - xCoord
-  maxHeight = maxY - yCoord
-  
-  if (string.find(objectType, " - ") ~= nil) then -- object is an AddOn
-    addOnName, objectName = splitAt(objectType, " - ")
-    objectValues = addOns[addOnName][objectName]
-    
-    objectID = objectValues.objectID
-    objectType = objectValues.objectType
-    defaultWidth = tonumber(objectValues.defaultWidth)
-    defaultHeight = tonumber(objectValues.defaultHeight)
-    canScale = objectValues.canScale
-    canClick = objectValues.canClick
-    
-    object.objID = objectID
-    object.objType = objectType
-    object.canScale = canScale
-    object.canClick = canClick
-    object.isAddOn = true
-    object.addOnName = addOnName
-    
-    if (objectType == "Button") then
-      object.width = (defaultWidth <= maxWidth) and defaultWidth or maxWidth
-      object.height = (defaultHeight <= maxHeight) and defaultHeight or maxHeight
-      object.widthPercent = maxX / object.width
-      object.heightPercent = maxY / object.height
-      object.text = objectValues.text
-      object.horizontalAlignment = "left"
-      object.verticalAlignment = "top"
-      showButton(object, buttonDefaultColor)
-    elseif (objectType == "Custom") then
-      if canScale then
-        object.width = (defaultWidth <= maxWidth) and defaultWidth or maxWidth
-        object.height = (defaultHeight <= maxHeight) and defaultHeight or maxHeight
-      else
-        object.width = defaultWidth
-        object.height = defaultHeight
-      end
-    elseif (objectType == "Variable") then
-      object.varID = objectID
-    elseif (objectType == "Input") then
-      object.inputID = objectID
-      object.message = objectValues.message
-      object.isPassword = objectValues.isPassword or false
-      showInput(object)
-    elseif (objectType == "List") then
-      object.listID = objectID
-      object.elements = objectValues.elements
-      showList(object)
-    end
-  elseif (objectType == "Button") then -- Object is not an AddOn.
-    object.width = (maxWidth < buttonDefaultWidth) and maxWidth or buttonDefaultWidth
-    object.height = (maxHeight < buttonDefaultHeight) and maxHeight or buttonDefaultHeight
-    object.widthPercent = maxX / object.width
-    object.heightPercent = maxY / object.height
-    object.text = "Button"
-    object.funcType = ""
-    object.param = ""
-    object.horizontalAlignment = "left"
-    object.verticalAlignment = "top"
-    showButton(object, buttonDefaultColor)
-  elseif (objectType == "Text") then
-    object.text = "Text"
-    showText(object)
-  elseif (objectType == "Variable") then
-    object.varID = "testVariable"
-  elseif (objectType == "Slider") then
-    object.length = (maxWidth < sliderDefaultLength) and maxWidth or sliderDefaultLength
-    object.lengthPercent = maxX / object.length
-    object.direction = "right"
-    object.sliderID = "testSlider"
-    showSlider(object)
-  elseif (objectType == "Input") then
-    object.inputID = "testInput"
-    object.message = "Enter something."
-    object.isPassword = false
-    showInput(object)
-  elseif (objectType == "List") then
-    object.elements = userLists.testList
-    object.listID = "testList"
-    object.isMultiselect = false
-    showList(object)
-  else
-    return
-  end
-  
-  table.insert(screens[currentScreen], object)
 end
 
 -- Shows lines marking the top left part of an
 -- object as well as well as pixels displaying
 -- the alignment of an object.
-function showAlignmentLines(object, left, top, right, bottom, color)
+function drawAlignmentLines(object, left, top, right, bottom)
+  local color = objectColors.Editor.marker
+  local moveX, moveY = objects.getMovePos(object)
+  
   -- Draw the lines.
-  showLine(left - 1, top, "left", left - 2, color) -- left
-  showLine(left, top -1, "up", top - 2, color) -- up
-  showLine(right + 1, top, "right", maxX - (right + 1), color) -- right
-  showLine(left, bottom + 1, "down", maxY - (bottom + 1), color) -- down
+  objects["Line"].draw(left - 1, moveY, "left", left - 2, color) -- left
+  objects["Line"].draw(moveX, top -1, "up", top - 2, color) -- up
+  objects["Line"].draw(right + 1, moveY, "right", maxX - (right + 1), color) -- right
+  objects["Line"].draw(moveX, bottom + 1, "down", maxY - (bottom + 1), color) -- down
   
   -- Display the alignment-pixels.
   horizontalAlignment = object.horizontalAlignment
   verticalAlignment = object.verticalAlignment
   
   if (horizontalAlignment == "left" or horizontalAlignment == "stretch") then -- left
-    drawPixel(1, top, editorAlignmentTrueColor)
+    drawPixel(1, moveY, objectColors["Editor"].alignmentTrue)
   else
-    drawPixel(1, top, editorAlignmentFalseColor)
+    drawPixel(1, moveY, objectColors["Editor"].alignmentFalse)
   end
   
   if (horizontalAlignment == "right" or horizontalAlignment == "stretch") then -- right
-    drawPixel(maxX, top, editorAlignmentTrueColor)
+    drawPixel(maxX, moveY, objectColors["Editor"].alignmentTrue)
   else
-    drawPixel(maxX, top, editorAlignmentFalseColor)
+    drawPixel(maxX, moveY, objectColors["Editor"].alignmentFalse)
   end
   
   if (verticalAlignment == "top" or verticalAlignment == "stretch") then -- top
-    drawPixel(left, 1, editorAlignmentTrueColor)
+    drawPixel(moveX, 1, objectColors["Editor"].alignmentTrue)
   else
-    drawPixel(left, 1, editorAlignmentFalseColor)
+    drawPixel(moveX, 1, objectColors["Editor"].alignmentFalse)
   end
   
   if (verticalAlignment == "bottom" or verticalAlignment == "stretch") then -- bottom
-    drawPixel(left, maxY, editorAlignmentTrueColor)
+    drawPixel(moveX, maxY, objectColors["Editor"].alignmentTrue)
   else
-    drawPixel(left, maxY, editorAlignmentFalseColor)
+    drawPixel(moveX, maxY, objectColors["Editor"].alignmentFalse)
   end
   
-  out.setBackgroundColor(colors.black)
+  out.setBackgroundColor(objectColors.background)
 end
 
 -- Returns the values of horizontalAlignment and
@@ -1220,109 +2151,34 @@ function getAlignment(left, top, right, bottom)
   return retHorizontal, retVertical
 end
 
--- Returns the right- and bottom-coordinates of the object.
-function getObjectDimensions(object)
-  if (type(object) ~= "table") then
-    return -1, -1, -1, -1
-  end
-  
-  objectType = object.objType
-  left = object.x
-  top = object.y
-  
-  if (objectType == "Button" or objectType == "List") then
-    right = left + object.width - 1
-    bottom = top + object.height - 1
-  elseif (objectType == "Text") then
-    right = left + string.len(object.text) - 1
-    bottom = top
-  elseif (objectType == "Variable" or objectType == "Input") then
-    right = left + 1
-    bottom = top
-  elseif (objectType == "Slider") then
-    direction = object.direction
-    length = object.length
-    
-    if (direction == "left") then
-      left = object.x - length
-      top = object.y
-      right = object.x
-      bottom = top
-    elseif (direction == "up") then
-      left = object.x
-      top = object.y - length
-      right = object.x
-      bottom = object.y
-    elseif (direction == "down") then
-      left = object.x
-      top = object.y
-      right = object.x
-      bottom = top + length
-    else -- right
-      left = object.x
-      top = object.y
-      right = object.x + length
-      bottom = top
-    end
-  elseif (objectType == "Custom") then -- AddOn
-    if (object.canScale or object.canClick) then
-      right = left + object.width
-      bottom = top + object.height
-    else
-      right = left
-      bottom = top
-    end
-  else
-    right = -1
-    bottom = -1
-  end
-  
-  return left, top, right, bottom
-end
-
-function findObject(x, y)
-  if showEditorOptions then
-    screenObject = editorScreens[currentScreen]
-  else
-    screenObject = screens[currentScreen]
-  end
-  for sObjectID, sObject in pairs(screenObject) do
-    left, top, right, bottom = getObjectDimensions(sObject)
-    
-    if (x >= left and x <= right and y >= top and y <= bottom) then
-      return sObjectID, sObject
-    end
-  end
-  
-  return nil, nil
-end
-
 -- Let's the user delete an object or change its attributes depending on the current edit-mode.
-function editObject(objectKey)
-  sObject = screens[currentScreen][objectKey]
-  objType = sObject.objType
-  left, top, right, bottom = getObjectDimensions(sObject)
+function editObject(object)
+  assert(object)
   
-  if (editActions[selectedItems.editActionList] == "Delete") then
-    screens[currentScreen][objectKey] = nil
-  elseif (editActions[selectedItems.editActionList] == "Attributes" and not screens[currentScreen][objectKey].isAddOn) then
-    objAttr = {  }
+  local objType = object.objType
+  local left, top, right, bottom = objects.getDimensions(object)
+  local actionsList = editorWindows.children.mainWindow.children[2]
+  local action = editActions[objects.List.getFirstSelectedKey(actionsList)]
+  
+  if (action == "Delete") then
+    objects.remove(object)
+  elseif (action == "Attributes") then
+    local objAttr = {  }
+    local includedAttributes = {
+      text = true,
+      param = true,
+      objID = true,
+      message = true,
+      elements = true,
+      message = true,
+      funcType = true,
+      isPassword = true,
+      isMultiselect = true,
+    }
     
     index = 1
-    for key, value in pairs(sObject) do
-      if (key ~= "objType" 
-      and key ~= "x" 
-      and key ~= "y" 
-      and key ~= "width" 
-      and key ~= "height" 
-      and key ~= "length" 
-      and key ~= "direction" 
-      and key ~= "xPercent" 
-      and key ~= "yPercent"
-      and key ~= "widthPercent"
-      and key ~= "heightPercent"
-      and key ~= "horizontalAlignment"
-      and key ~= "verticalAlignment") then
+    for key, value in pairs(object) do
+      if (includedAttributes[key]) then
         table.insert(objAttr, index, key)
         index = index + 1
       end
@@ -1330,36 +2186,32 @@ function editObject(objectKey)
     
     out.clear()
     
-    yPos = 2
+    local yPos = 2
     top = yPos
     for attrKey, attrValue in ipairs(objAttr) do
       out.setCursorPos(2, yPos)
       out.write(attrValue .. ": ")
-      out.write(sObject[attrValue])
+      out.write(object[attrValue])
       yPos = yPos + 1
     end
     out.setCursorPos(2, yPos + 1)
     out.setBackgroundColor(colors.red)
-    out.write(doneString)
-    out.setBackgroundColor(colors.black)
+    out.write(text.done)
+    out.setBackgroundColor(objectColors.background)
     
     bottom = yPos - 1
     finished = false
     while not finished do
-      x, y, mouseButton = getCursorInput()
+      local x, y, mouseButton = getCursorInput()
       
       if y >= top and y <= bottom then
-        selectedAttr = objAttr[y - 1]
+        local selectedAttr = objAttr[y - 1]
         if not outIsTerm then
           drawPixel(1, y, colors.yellow)
         end
         
-        if (selectedAttr == "text" or 
-            selectedAttr == "param" or 
-            selectedAttr == "varID" or 
-            selectedAttr == "sliderID" or 
-            selectedAttr == "inputID" or 
-            selectedAttr == "listID" or 
+        if (selectedAttr == "param" or
+            selectedAttr == "objID" or
             selectedAttr == "message" or
             selectedAttr == "elements" or
             selectedAttr == "message") then
@@ -1369,24 +2221,36 @@ function editObject(objectKey)
             out.clearLine(y)
             out.setCursorPos(2, y)
             out.write(selectedAttr .. ": ")
-            --out.setCursorPos(4 + string.len(selectedAttr), y)
           end
           
           userInput = readUserInput("Please enter a value for the " .. selectedAttr .. ".", false)
           if (userInput ~= nil) then
-            screens[currentScreen][objectKey][selectedAttr] = userInput
+            object[selectedAttr] = userInput
+          end
+        elseif (selectedAttr == "text") then
+          if outIsTerm then
+            out.setCursorPos(1, y)
+            out.clearLine(y)
+            out.setCursorPos(2, y)
+            out.write(selectedAttr .. ": ")
+          end
+          
+          userInput = readUserInput("Please enter a value for the " .. selectedAttr .. ".", false)
+          if (userInput ~= nil) then
+            object[selectedAttr] = userInput
+            object.width = #userInput
           end
         elseif (selectedAttr == "funcType") then -- Button attribute
-          if (sObject.funcType == "switch") then
-            screens[currentScreen][objectKey][selectedAttr] = "function"
+          if (object.funcType == "switch") then
+            object[selectedAttr] = "function"
           else
-            screens[currentScreen][objectKey][selectedAttr] = "switch"
+            object[selectedAttr] = "switch"
           end
         elseif (selectedAttr == "isPassword" or selectedAttr == "isMultiselect") then
-          if (sObject[selectedAttr]) then
-            screens[currentScreen][objectKey][selectedAttr] = false
+          if (object[selectedAttr]) then
+            object[selectedAttr] = false
           else
-            screens[currentScreen][objectKey][selectedAttr] = true
+            object[selectedAttr] = true
           end
         end
         drawPixel(1, y, colors.black)
@@ -1397,191 +2261,146 @@ function editObject(objectKey)
           end
           out.setCursorPos(2, y)
           out.write(selectedAttr .. ": ")
-          out.write(sObject[selectedAttr])
+          out.write(object[selectedAttr])
         end
-      elseif (y == yPos + 1 and x >= 2 and x <= 1 + string.len(doneString)) then
+      elseif (y == yPos + 1 and x >= 2 and x <= 1 + string.len(text.done)) then
         finished = true
       end
     end
   else -- Design mode
-    canScale = false
-    moveX = left
-    moveY = top
+    local moveX, moveY = objects.getMovePos(object)
+    local scaleX, scaleY
     
-    if (objType == "Button") then
-      drawPixel(right, bottom, editorScaleColor) -- Draw scale-pixel.
-      scaleX = right
-      scaleY = bottom
-      canScale = true
-    elseif (objType == "Slider") then
-      direction = sObject.direction
-      assert(direction)
-      canScale = true
-      
-      if (direction == "left") then
-        moveX = right
-        moveY = top
-        scaleX = left
-        scaleY = bottom
-      elseif (direction == "up") then
-        moveX = left
-        moveY = bottom
-        scaleX = right
-        scaleY = top
-      else -- right or down
-        moveX = left
-        moveY = top
-        scaleX = right
-        scaleY = bottom
-      end
-      
-      drawPixel(scaleX, scaleY, editorScaleColor) -- Draw scale-pixel.
-    elseif (objType == "Custom" and sObject.canScale) then -- AddOn
-      canScale = true
-      scaleX = right
-      scaleY = bottom
-      drawPixel(scaleX, scaleY, editorScaleColor)
+    if object.canScale then
+      scaleX, scaleY = objects.getScalePos(object)
+      drawPixel(scaleX, scaleY, objectColors.Editor.scale)
     end
     
-    drawPixel(moveX, moveY, editorMoveColor)
-    showAlignmentLines(sObject, left, top, right, bottom, editorMarkerColor)
+    drawPixel(moveX, moveY, objectColors.Editor.move)
+    out.setBackgroundColor(objectColors.background)
     
-    horizontalAlignment = screens[currentScreen][objectKey].horizontalAlignment
-    verticalAlignment = screens[currentScreen][objectKey].verticalAlignment
-    leftAlignment = (horizontalAlignment == "left" or horizontalAlignment == "stretch")
-    rightAlignment = (horizontalAlignment == "right" or horizontalAlignment == "stretch")
-    topAlignment = (verticalAlignment == "top" or verticalAlignment == "stretch")
-    bottomAlignment = (verticalAlignment == "bottom" or verticalAlignment == "stretch")
+    local x, y, mouseButton = getCursorInput()
+    local relX, relY = Path.getRelativePos(object.path, x, y)
     
-    out.setBackgroundColor(colors.black)
-    
-    x, y, mouseButton = getCursorInput()
-    
-    if (x >= left and x <= right and y >= top and y <= bottom) then -- clicked inside the object
+    if (relX >= left and relX <= right and relY >= top and relY <= bottom) then -- clicked inside the object
       if (x == moveX and y == moveY) then -- move object
-        drawPixel(moveX, moveY, colors.white)
+        drawPixel(moveX, moveY, objectColors.Editor.active)
         x, y, mouseButton = getCursorInput()
-        screens[currentScreen][objectKey].x = x
-        screens[currentScreen][objectKey].y = y
-        screens[currentScreen][objectKey].xPercent = x / maxX
-        screens[currentScreen][objectKey].yPercent = y / maxY
-      elseif (canScale and x == scaleX and y == scaleY) then -- scale object
-        drawPixel(scaleX, scaleY, colors.white)
-        out.setBackgroundColor(colors.black)
-        x, y, mouseButton = getCursorInput()
+        addX = x - moveX
+        addY = y - moveY
+        objects.move(object, addX, addY)
+      elseif (object.canScale and x == scaleX and y == scaleY) then -- scale object
+        drawPixel(scaleX, scaleY, objectColors.Editor.active)
+        out.setBackgroundColor(objectColors.background)
+        local x, y, mouseButton = getCursorInput()
+        local relX, relY = Path.getRelativePos(object.path, x, y)
         
-        if (objType == "Button" or objType == "Custom") then
-          if (x > moveX + 2 and y >= moveY) then
-            width = x - left + 1
-            height = y - top + 1
-            screens[currentScreen][objectKey].width = width
-            screens[currentScreen][objectKey].height = height
-            screens[currentScreen][objectKey].widthPercent = width / maxX
-            screens[currentScreen][objectKey].heightPercent = height / maxY
-          end
-        elseif (objType == "Slider") then
-          if (x < moveX and y == moveY) then -- Clicked left of the slider.
-            length = moveX - x
-            screens[currentScreen][objectKey].direction = "left"
-            screens[currentScreen][objectKey].length = length
-            screens[currentScreen][objectKey].lengthPercent = length / maxX
-          elseif (x == moveX and y < moveY) then -- Clicked above the slider.
-            length = moveY - y
-            screens[currentScreen][objectKey].direction = "up"
-            screens[currentScreen][objectKey].length = length
-            screens[currentScreen][objectKey].lengthPercent = length / maxY
-          elseif (x > moveX and y == moveY) then -- Clicked right of the slider.
-            length = x - moveX
-            screens[currentScreen][objectKey].direction = "right"
-            screens[currentScreen][objectKey].length = length
-            screens[currentScreen][objectKey].lengthPercent = length / maxX
-          elseif (x == moveX and y > moveY) then -- Clicked below the slider.
-            length = y - moveY
-            screens[currentScreen][objectKey].direction = "down"
-            screens[currentScreen][objectKey].length = length
-            screens[currentScreen][objectKey].lengthPercent = length / maxY
-          end
-        end
+        objects.scale(object, relX, relY)
       else -- clicked something else inside the object (no idea what I could use this for)
         
       end
-    else -- User might have clicked an alignment-pixel.
-      finished = false
-      while not finished do
-        
-        if (x == 1 and y == top) then -- left alignment-pixel
-          --leftAlignment = not leftAlignment
-        elseif (x == left and y == 1) then -- top alignment-pixel
-          --topAlignment = not topAlignment
-        elseif (x == maxX and y == top) then -- right alignment-pixel
-          rightAlignment = not rightAlignment
-        elseif (x == left and y == maxY) then -- bottom alignment-pixel
-          bottomAlignment = not bottomAlignment
-        else
-          finished = true
-        end
-        
-        horizontalAlignment, verticalAlignment = getAlignment(leftAlignment, topAlignment, rightAlignment, bottomAlignment)
-        screens[currentScreen][objectKey].horizontalAlignment = horizontalAlignment
-        screens[currentScreen][objectKey].verticalAlignment = verticalAlignment
-        
-        if not finished then
-          showAlignmentLines(sObject, left, top, right, bottom, editorMarkerColor)
-          x, y, mouseButton = getCursorInput()
-        end
-      end
     end
   end
   
-  out.setBackgroundColor(colors.black)
-  showScreen(currentScreen)
+  out.setBackgroundColor(objectColors.background)
+  drawWindow(currentWindow)
 end
 
-function markVariables()
-  for sObjectID, sObject in pairs(screens[currentScreen]) do
-    if (sObject.objType == "Variable") then
-      drawPixel(sObject.x, sObject.y, colors.lime)
-      out.setBackgroundColor(colors.black)
+function markVariables(container)
+  assert(container)
+  
+  for _, object in pairs(container.children) do
+    if (object.isContainer) then
+      markVariables(object)
+    elseif (object.objType == "Variable") then
+      drawPixel(object.absoluteX, object.absoluteY, objectColors.Editor.marker)
+      out.setBackgroundColor(objectColors.background)
     end
   end
+end
+
+function markDefaultButtons()
+  local window = getCurrentWindow()
+  
+  -- refresh button
+  local refresh = defaultButtons.refresh
+  out.setCursorPos(refresh.left, refresh.top)
+  if (window.showRefreshButton) then
+    out.setBackgroundColor(objectColors.Button.default)
+    out.write(refresh.text)
+  else
+    out.setBackgroundColor(objectColors.Editor.marker)
+    out.write(string.rep(" ", #refresh.text))
+  end
+  
+  -- back button
+  if (currentWindow ~= "mainWindow") then
+    local back = defaultButtons.back
+    out.setCursorPos(back.left, back.top)
+    if (window.showBackButton) then
+      out.setBackgroundColor(objectColors.Button.default)
+      out.write(back.text)
+    else
+      out.setBackgroundColor(objectColors.Editor.marker)
+      out.write(string.rep(" ", #back.text))
+    end
+  end
+  
+  out.setBackgroundColor(objectColors.background)
 end
 
 function getEditorInput()
+  local event
+  local x, y, mouseButton
+  
   if not showEditorOptions then
-    markVariables()
-    xCoord, yCoord, mouseButton = getCursorInput()
+    markVariables(getCurrentWindow())
+    markDefaultButtons()
+    event = getAnyInput()
+    
+    if (event.eventType == "mouse") then
+      x, y, mouseButton = event.x, event.y, event.mouseButton
+    end
   end
   
-  if (showEditorOptions or yCoord == maxY and xCoord > maxX - string.len(refreshText)) then -- "Refresh" pressed => Options screen
+  if (not showEditorOptions and event.eventType == "key") then
+    callShortcut(event.key)
+  elseif (showEditorOptions or defaultButtonPressed("options", x, y)) then
     showEditorOptions = true
-    showScreen("mainScreen")
+    drawWindow("mainWindow")
     while showEditorOptions and not quit do
       getInput()
     end
-  elseif (yCoord == maxY and xCoord >= 1 and xCoord <= string.len(backText)) then -- "Back" pressed => Quit
+  elseif (defaultButtonPressed("quit", x, y)) then
     quit = true
+  elseif (defaultButtonPressed("refresh", x, y)) then
+    windows.children[currentWindow].showRefreshButton = not windows.children[currentWindow].showRefreshButton
+  elseif (defaultButtonPressed("back", x, y)) then
+    windows.children[currentWindow].showBackButton = not windows.children[currentWindow].showBackButton
   else
-    key, value = findObject(xCoord, yCoord) -- Find the object that the user touched.
-    if (key == nil) then -- No object touched. Show selector for new object.
-      drawPixel(xCoord, yCoord, colors.white)
-      if (showSelector(xCoord, yCoord, objectTypes)) then -- something has been selected
-        showDefaultObject(selectedItem, xCoord, yCoord)
+    local container = getCurrentWindow()
+    local path = windowBuffer.bufferTable[x][y].path
+    
+    if (path == nil or #path == 0) then -- No object touched. Draw selector for new object.
+      drawPixel(x, y, objectColors.Editor.new)
+      if (objects.Selector.draw(x, y, objectTypes)) then -- something has been selected
+        objects.create(selectedItem, x, y)
       end
     else
+      local object = Path.getObject(path)
+      
       if (mouseButton == 1) then
-        editObject(key)
+        editObject(object)
       else
-        if (showSelector(xCoord, yCoord, rightClickActions)) then
+        if (objects.Selector.draw(x, y, rightClickActions)) then
           if (selectedItem == "Attributes") then
             lastItem = selectedItems.editActionList
-            selectedItems.editActionList = 2
-            editObject(key)
+            selectedItems.editActionList = { [2] = true }
+            editObject(object)
             selectedItems.editActionList = lastItem
           elseif (selectedItem == "Delete") then
-            lastItem = selectedItems.editActionList
-            selectedItems.editActionList = 3
-            editObject(key)
-            selectedItems.editActionList = lastItem
+            objects.remove(object)
+            drawWindow()
           end
         end
       end
@@ -1589,184 +2408,18 @@ function getEditorInput()
   end
 end
 
-function screenEditor()
+function windowEditor()
   editMode = true
   autoLoadObjects = false
   
   showEditorOptions = true
-  showScreen("mainScreen")
   
   while not quit do
     getEditorInput()
   end
 end
 
--- screen editor region end --
-
--- AddOn manager region start --
-
--- Removes all whitespaces to the left and right of the string.
-function trim(s)
-  return s:gsub("^%s*(.-)%s*$", "%1")
-end
-
--- Prints the message at the screen and exits the program.
-function throwException(message, fileName, lineNumber)
-  error("AddOn loader error when reading file " .. fileName .. " at line " .. lineNumber .. ":\n" .. message)
-end
-
--- Sets the optional attributes to their default-values if they haven't been set.
-function setDefaultAttributes(object)
-  if (object.objectType == "Button") then
-    object.defaultWidth = (object.defaultWidth ~= nil) and object.defaultWidth or buttonDefaultWidth
-    object.defaultHeight = (object.defaultHeight ~= nil) and object.defaultHeight or buttonDefaultHeight
-  elseif (object.objectType == "List") then
-    object.elements = string.gmatch(object.elements, "[^;]+")
-  end
-  
-  object.canScale = (object.canScale ~= nil) and object.canScale or false
-  object.canClick = (object.canClick ~= nil) and object.canClick or false
-  
-  return object
-end
-
--- Returns whether the object is valid or not. Returns a message if it isn't.
-function validateAddOnObject(object)
-  if (object == nil or type(object) ~= "table") then
-    return false, "Object is not a table!"
-  end
-  
-  if (object.objectID == nil or object.objectID == "") then
-    return false, "Object has no objecID!"
-  end
-  
-  objType = object.objectType
-  if (objType ~= "Button" and
-      objType ~= "Variable" and
-      objType ~= "Input" and
-      objType ~= "List" and
-      objType ~= "Custom") then
-    return false, "Object has an invalid type!"
-  end
-  
-  if (objType == "Button") then
-    if (object.defaultWidth == nil or 
-        object.defaultHeight == nil) then
-      return false, "Button-type objects need to have defaultWidth and defaultHeight attributes!"
-    elseif (object.text == nil) then
-      return false, "Button-type objects need to have a text attribute!"
-    end
-  elseif (objType == "List") then
-    if (object.elements == nil) then
-      return false, "List-type objects need to have an elements-attribute!"
-    end
-  elseif (objType == "Custom") then
-    if (object.canScale or object.canClick) then
-      if (object.defaultWidth == nil or 
-        object.defaultHeight == nil) then
-        return false, "Default objects need to have defaultWidth and defaultHeight attributes when canScale or canClick is set to true!"
-      end
-    end
-  end
-  
-  return true, nil
-end
-
--- Reads the information between the file's <object> tags and adds the objects to the addOns-table.
-function readAddOn(filePath)
-  file = fs.open(filePath, "r")
-  fileName = string.sub(fs.getName(filePath), 1, -5)
-  addOns[fileName] = {}
-  
-  started = false
-  finished = false
-  lineNumber = 0
-  
-  newObject = nil
-  createNewObject = false
-  newObjectLine = -1
-  
-  while not finished do
-    line = file.readLine()
-    line = trim(line)
-    lineNumber = lineNumber + 1
-    
-    if (line == nil) then -- Reached end of line.
-      throwException("Objects not found!", fileName, lineNumber)
-    elseif (line == "" and started) then
-      throwException("No </objects> tag found in the file! Make sure that you don't have any empty lines between the <objects> tags!", fileName, lineNumber)
-    elseif (line == "<objects>") then
-      if started then
-        throwException("Root tag <objects> can only be used once!", fileName, lineNumber)
-      else
-        started = true
-      end
-    elseif (line == "</objects>") then
-      if createNewObject then -- Code ends without finishing the last object.
-        throwException("No </object> tag found to close <object> at line " .. newObjectLine, fileName, lineNumber)
-      else
-        finished = true
-      end
-    elseif (line == "<object>") then
-      if createNewObject then -- no "</object>" before the next "<object>" tag.
-        throwException("No </object> tag found to close <object> at line " .. newObjectLine, fileName, lineNumber)
-      else
-        createNewObject = true
-        newObject = {}
-        newObjectLine = lineNumber
-      end
-    elseif (line == "</object>") then -- Create object and add it to the addOns-table.
-      if not createNewObject then
-        throwException("No <object> tag found that needs to be closed.", fileName, lineNumber)
-      else
-        newObject = setDefaultAttributes(newObject)
-        isValid, errMsg = validateAddOnObject(newObject)
-        if not isValid then
-          throwException("Object declared between line " .. newObjectLine .. " and " .. lineNumber .. " is invalid: " .. errMsg, fileName, lineNumber)
-        else
-          addOns[fileName][newObject.objectID] = newObject
-          newObject = nil
-          createNewObject = false
-          newObjectLine = -1
-        end
-      end
-    elseif (string.find(line, "=") and started) then -- Line defines an attribute.
-      if not createNewObject then
-        throwException("Declared an attribute without having an <object> tag!", fileName, lineNumber)
-      else
-        attribute, value = splitAt(line, "=")
-        newObject[attribute] = value
-      end
-    elseif started then -- Throw an error if the line is inside the <objects> tags and if it's invalid. Otherwise keep looking for the <objects> tag.
-      throwException("Line is neither a tag nor an attribute!", fileName, lineNumber)
-    end
-  end
-  
-  file.close()
-end
-
--- Looks for AddOn files and adds them to the addOns-table.
-function loadAddOns()
-  local currentDir = shell.dir()
-  local files = fs.list(currentDir)
-  for key, file in pairs(files) do
-    if not fs.isDir(file) then -- if "file" is an actual file
-      if string.sub(file, -4) == addOnExtension then -- if the file is a valid AddOn-file
-        readAddOn(file)
-      end
-    end
-  end
-  
-  for tableKey, tableValue in pairs(addOns) do
-    for key, value in pairs(tableValue) do
-      table.insert(objectTypes, tableKey .. " - " .. key)
-    end
-  end
-end
-
--- AddOn manager region end --
-
--- Screen size adaptation region start --
+-- >>> Screen size adaption
 
 function round(number)
   assert(number)
@@ -1780,70 +2433,6 @@ function round(number)
   return ret
 end
 
--- Checks the default-size of the screens
--- table and adapts all objects to the new size if
--- the screen-size has changed.
-function checkDefaultSize()
-  defaultX = screens["defaultX"]
-  defaultY = screens["defaultY"]
-  if (screens["defaultX"] == nil or screens["defaultY"] == nil) then -- Program has been started for the first time.
-    screens["defaultX"] = maxX
-    screens["defaultY"] = maxY
-    saveScreens()
-  elseif (screens["defaultX"] ~= maxX or screens["defaultY"] ~= maxY) then -- Screen-size is different since last program start.
-    xDiff = maxX - defaultX
-    yDiff = maxY - defaultY
-    for screenID, screen in pairs(screens) do
-      if (type(screen) == "table") then
-        for objectID, object in pairs(screen) do
-          if (type(object) == "table") then
-            objType = object.objType
-            x = object.x
-            y = object.y
-            xPercent = object.xPercent
-            yPercent = object.yPercent
-            widthPercent = object.widthPercent
-            heightPercent = object.heightPercent
-            horizontalAlignment = object.horizontalAlignment
-            verticalAlignment = object.verticalAlignment
-            
-            if (horizontalAlignment == nil or verticalAlignment == nil) then
-              horizontalAlignment = "left"
-              verticalAlignment = "top"
-              screens[screenID][objectID].horizontalAlignment = horizontalAlignment
-              screens[screenID][objectID].verticalAlignment = verticalAlignment
-            end
-            
-            if (horizontalAlignment == "stretch") then -- Stretch object horizontally.
-              screens[screenID][objectID].x = round(maxX * xPercent)
-              if (objType == "Button") then
-                screens[screenID][objectID].width = round(maxX * widthPercent)
-              elseif (objType == "Slider" and (direction == "left" or direction == "right")) then
-                screens[screenID][objectID].length = round(maxX * object.lengthPercent)
-              end
-            end
-            
-            if (verticalAlignment == "stretch") then
-              screens[screenID][objectID].y = round(maxY * yPercent)
-              if (objType == "Button") then
-                screens[screenID][objectID].height = round(maxY * heightPercent)
-              elseif (objType == "Slider" and (direction == "up" or direction == "down")) then
-                screens[screenID][objectID].length = round(maxX * object.lengthPercent)
-              end
-            end
-          end
-        end
-      end
-    end
-    
-    screens.defaultX = maxX
-    screens.defaultY = maxy
-    saveScreens()
-  end
-end
-
--- Screen size adaptation region end --
-
 function printInfo()
   print()
   print(version)
@@ -1856,7 +2445,72 @@ function printInfo()
   print("Visit the CC-forums or my YouTube channel (LPF1337) for news and help.")
 end
 
--- initialization
+function testMethod()
+  error("Nothing to test...")
+end
+
+-- >>> initialization
+
+-- Tells the user that the monitor or computer
+-- doesn't support colors.
+function showColorWarning()
+  out.clear()
+  out.setCursorPos(2, 2)
+  out.write("This computer/monitor does not support colors!")
+  
+  local state = 0
+  local move = "I don't know this move!"
+  local finished = false
+  while not finished and not quit do
+    out.setCursorPos(1, 4)
+    out.clearLine()
+    out.setCursorPos(2, 4)
+    
+    if (state == 0) then
+      move = "<( \" <) <( \" <) <( \" <)"
+    elseif (state == 1 or state == 3 or state == 5) then
+      move = "  (^\"^)   (^\"^)   (^\"^)"
+    elseif (state == 2) then
+      move = "  (> \" )> (> \" )> (> \" )>"
+    elseif (state == 4) then
+      move = " (> \" )><( \" )><( \" <)"
+    elseif (state == 6) then
+      move = "<( \" <) (>\"<) (> \" )>"
+    elseif (state == 7) then
+      move = " (v''v) (v''v) (v''v)"
+    else
+      error("Unable to show you that you need an advanced computer/monitor in a fancy way!")
+    end
+    
+    out.write(move)
+    state = (state + 1) % 8
+    os.sleep(0.25)
+  end
+end
+
+-- Checks if the monitor on monitorSide exists and wraps it into "monitor".
+function getOutput()
+  if (monitor == nil and outIsTerm == false) then
+    local monitorFound = false
+    for _, side in pairs(sides) do
+      if (peripheral.getType(side) == "monitor") then
+        monitor = peripheral.wrap(side)
+        monitorFound = true
+        out = monitor
+        outIsTerm = false
+      end
+    end
+    
+    if not monitorFound then
+      out = term
+      outIsTerm = true
+    end
+  elseif outIsTerm then
+    out = term
+  else
+    out = monitor
+  end
+end
 
 function init()
   getOutput()
@@ -1864,6 +2518,11 @@ function init()
   maxX, maxY = out.getSize()
   if (maxX < 16 or maxY < 10) then -- smaller than 2x2
     print("Screen too small! You need at least 2x2 monitors!")
+    return false
+  elseif not out.isColor() then
+    parallel.waitForAny(showColorWarning, getKeyInput)
+    out.clear()
+    out.setCursorPos(1, 1)
     return false
   end
   
@@ -1875,15 +2534,17 @@ end
 
 function checkArgs()
   doCall = main
+  arg = args[1]
   
-  if (args[1] ~= nil) then
-    if (args[1] == "edit") then
-      doCall = screenEditor
-    elseif (args[1] == "info") then
-      printInfo()
-      return
-    elseif (args[1] == "term") then
+  if (arg ~= nil) then
+    if (arg == "edit") then
+      doCall = windowEditor
+    elseif (arg == "info") then
+      doCall = printInfo
+    elseif (arg == "term") then
       outIsTerm = true
+    elseif (arg == "test") then
+      doCall = testMethod
     end
   end
   
@@ -1891,20 +2552,22 @@ function checkArgs()
 end
 
 if init() then
-  if isAPI then
-    loadScreens()
-    --checkDefaultSize()
-  else
-    loadAddOns()
-    loadScreens()
-    --checkDefaultSize()
+  loadWindows()
+  initDefaultButtons()
+  
+  if not isAPI then
+    loadWindows()
     checkArgs()
     
     if editMode then
-      saveScreens()
+      saveWindows()
     end
     
+    out.setTextColor(colors.white)
+    out.setBackgroundColor(colors.black)
     out.clear()
     out.setCursorPos(1, 1)
   end
+else
+  error("Graffiti Initialization failed!")
 end

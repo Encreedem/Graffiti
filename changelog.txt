@@ -1,0 +1,33 @@
+v1.1.1
+- The direction of a slider can be changed in "Design"-mode now.
+- The "message"-attribute of the input-object wasn't shown.
+- Improvement of the input-object (now it shouldn't matter what kind of keyboard you use).
+- Bugfixes. Lots of bugfixes.
+
+v1.2
+- Included AddOn support.
+- Bugfix: The elements of the list-object couldn't be changed.
+- More bugfixes
+
+v1.3
+- Added an API
+- Added the attributes "horizontalAlignment" and "verticalAlignment" to the editor. They allow you to automatically move/scale certain objects when the screen-size changes.
+- Bugfix: Lists with enabled "isMultiselect" attribute couldn't be changed.
+
+v1.4
+- Added advanced computer support.
+- Removed the automatic adaption of objects to the screen size after making it more complicated and realizing that it didn't do what I wanted anymore.
+
+v1.5
+- Included the GraffitiAPI into the main program.
+- Fixed a bug where input objects acted strange when the program got used as an API.
+
+v1.6
+- Added container objects.
+- Added color themes.
+- Renamed almost everything from "screen" to "window".
+- Renamed the "Slider" object to "ProgressBar".
+- Renamed most "show" functions to "draw".
+- Completely changed event handling and displaying of the objects.
+- Removed AddOn support.
+- Bugfix: Elements of List-objects couldn't be changed. (This time it does work!)
