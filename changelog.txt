@@ -31,3 +31,8 @@ v1.6
 - Completely changed event handling and displaying of the objects.
 - Removed AddOn support.
 - Bugfix: Elements of List-objects couldn't be changed. (This time it does work!)
+
+v1.6.1
+- Added "toggle" function type for buttons.
+- Added ScrollView container.
+- Improved the save-file.

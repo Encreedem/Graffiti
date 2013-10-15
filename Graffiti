@@ -1,6 +1,6 @@
 -- TODO: The Progress Bars movePos and scalePos get messed up when it's facing up.
 
-local version = "1.6"
+local version = "1.6.1"
 
 -- >>> Variables
 
@@ -10,6 +10,7 @@ local userLists = {}
 local userInputs = {}
 local selectedItems = {}
 local selectedFiles = {}
+local toggleState = {}
 
 --Monitor
 local monitor = nil
@@ -50,6 +51,11 @@ colorThemes.Default = {
     Panel = {
       border = colors.white;
     };
+    ScrollView = {
+      border = colors.white;
+      scrollBackground = colors.lightGray;
+      scrollForeground = colors.gray;
+    };
   };
 }
 
@@ -74,6 +80,11 @@ colorThemes["Windows CC"] = {
     Panel = {
       border = colors.lightGray;
     };
+    ScrollView = {
+      border = colors.lightGray;
+      scrollBackground = colors.lightGray;
+      scrollForeground = colors.black;
+    };
   };
 }
 
@@ -87,8 +98,11 @@ size.Button = { width = 10; height = 3; }
 size.ProgressBar = { length = 10; }
 size.Container = { width = 20; height = 10; }
 
--- Save File
+-- Files Info
 local saveFileName = "Graffiti.sav"
+local logFilePath = "GraffitiLog"
+local logFileName = "Graffiti.log"
+local logFileHandler = nil
 
 -- API
 local initDone = false
@@ -99,6 +113,7 @@ local progressBarValues = {}
 -- Editor Options
 local editMode = false
 local showEditorOptions = false
+local saveAfterQuit = true
 local editActions = { "Design", "Attributes", "Delete" }
 local lastWindow = "mainWindow"
 local editorFunctions = {}
@@ -107,15 +122,16 @@ local rightClickActions = {"Attributes", "Delete" }
 -- tables
 local args = { ... }
 local sides = { "left", "top", "right", "bottom", "front", "back" }
-local objectTypes = { "Button", "Text", "Variable", "ProgressBar", "Input", "List", "Panel" }
+local objectTypes = { "Button", "Text", "Variable", "ProgressBar", "Input", "List", "Panel", "ScrollView" }
 local eventTypes = { "quit", "button_clicked", "button_toggled", "selection_changed", "text_changed" }
 local objects = {}
-local windows = { children = { mainWindow = { objType = "Window", children = {} } } }
+local windows = {children = { mainWindow = { objType = "Window", children = {} } }}
 local windowBuffer = nil
 local defaultButtons = {}
 
 -- Other
 local quit = false
+local doLog = true -- Determines wheter a log file should be created or not.
 local maxX, maxY = 51, 19
 local out = term -- Output: either "term" or the monitor
 local outIsTerm = false
@@ -123,12 +139,21 @@ local autoLoadObjects = true
 local changeButtonColor = true
 local currentWindow = "mainWindow"
 
--- >> User Functions
+-- >> User Code: (This section is just for YOU!)
 
 -- user variables
 local randomValue= 50
 
 -- user functions
+
+--[[ How to make your own functions:
+Note: toggleState is only needed if the buttons'
+funcType-attribute is set to "toggle function"
+
+function userFunctions.<paramAttribute>(toggleState)
+  your code here
+end
+]]
 
 function userFunctions.test()
   sleep(1)
@@ -140,6 +165,10 @@ end
 
 function userFunctions.refresh()
   drawWindow()
+end
+
+function userFunctions.toggleTest(toggleState)
+  rs.setOutput("front", toggleState)
 end
 
 -- user lists
@@ -209,6 +238,50 @@ function dBug(text)
   getKeyInput()
 end
 
+-- Writes the text into a logfile.
+function log(text, logType)
+  if not doLog then
+    return
+  end
+  
+  if (not fs.exists(logFilePath)) then
+    if (fs.isDir(logFilePath)) then
+      error("Can't create directory " .. logFilePath .. "! A file with that name exists!", 0)
+    else
+      fs.makeDir(logFilePath)
+    end
+  end
+  
+  local filePath = fs.combine(logFilePath, logFileName)
+  
+  if (fs.exists(filePath) and fs.isReadOnly(filePath)) then
+    error("File " .. filePath .. " is readonly!", 0)
+  end
+  
+  if (fs.exists(filePath)) then
+    logFileHandler = fs.open(filePath, "a")
+  else
+    logFileHandler = fs.open(filePath, "w")
+  end
+  
+  if (type(text) == "table") then
+    local delimiter = ""
+    
+    logFileHandler.write((logType or "INFO") .. ": ")
+    
+    for key, value in pairs(text) do
+      logFileHandler.write(delimiter .. key .. "=" .. tostring(value))
+      delimiter = ", "
+    end
+    
+    logFileHandler.writeLine()
+  else
+    logFileHandler.writeLine((logType or "INFO") .. ": " .. tostring(text))
+  end
+  
+  logFileHandler.close()
+end
+
 -- >>> Shortcut functions (for key inputs)
 -- Not yet implemented! WIP!
 -- TODO: Fix bug where the key event won't disappear from the queue.
@@ -221,7 +294,7 @@ end
 
 shortcut = {}
 
--- s
+-- S
 shortcut[31] = function()
   out.clear()
   out.setCursorPos(1, 1)
@@ -233,7 +306,7 @@ shortcut[31] = function()
   print("Press any key to continue...")
 end
 
--- q
+-- Q
 shortcut[16] = function()
   quit = true
 end
@@ -245,52 +318,6 @@ function clearScreen()
   out.setTextColor(objectColors.text)
   out.clear()
   out.setCursorPos(1, 1)
-end
-
-function initDefaultButtons()
-  defaultButtons.quit = {
-    text=text.quit,
-    left=maxX - string.len(text.quit) + 1,
-    top=1,
-    right=maxX,
-    bottom=1,
-    required = function()
-      return true
-    end
-  }
-  
-  defaultButtons.back = {
-    text = text.back,
-    left = 1,
-    top = 1,
-    right = string.len(text.back),
-    bottom = 1,
-    required = function()
-      return getCurrentWindow().showBackButton
-    end
-  }
-  
-  defaultButtons.refresh = {
-    text = text.refresh,
-    left = maxX - string.len(text.refresh) + 1,
-    top = maxY,
-    right = maxX,
-    bottom = maxY,
-    required = function()
-      return (getCurrentWindow().showRefreshButton or (editMode and not showEdtorOptions))
-    end
-  }
-  
-  defaultButtons.options = {
-    text = text.options,
-    left = 1,
-    top = maxY,
-    right = string.len(text.options),
-    bottom = maxY,
-    required=function()
-      return (editMode and not showEditorOptions)
-    end
-  }
 end
 
 -- Returns whether the button with the given name
@@ -396,6 +423,8 @@ function getOrientation(direction)
   return orientation
 end
 
+-- Checks whether the eventTypes table contains
+-- the given event type.
 function eventTypeExists(eventType)
   if (eventType == nil) then
     return true
@@ -410,13 +439,62 @@ function eventTypeExists(eventType)
   return false
 end
 
+-- Returns the size that a buffer needs to have
+-- to contain all children of a container.
+function getNecessaryBufferSize(children, minWidth, minHeight)
+  log("getNecessaryBufferSize", "FUNC")
+  local width, height = (minWidth or 0), (minHeight or 0)
+  
+  for _, child in pairs(children) do
+    local right = child.width and child.x + child.width or child.x
+    local bottom = child.height and child.y + child.height or child.y
+    
+    width = (right > width) and right or width
+    height = (bottom > height) and bottom or height
+  end
+  
+  return width, height
+end
+
+-- Returns a table containing the position and
+-- size that the scroll bar of a ScrollView object
+-- should have.
+function getScrollBarInfo(pos, containerSize, bufferSize)
+  log("getScrollBarInfo", "FUNC")
+  log("pos: " .. pos .. ", containerSize: " .. containerSize .. ", bufferSize: " .. bufferSize .. ".", "ATTR")
+  
+  local ret = {}
+  local maxScrollBarHeight = containerSize - 4
+  
+  local scrollCount = bufferSize - containerSize + 1 -- How often can the user scroll?
+  if (scrollCount < 0) then
+    scrollCount = 0
+  end
+  
+  local scrollBarSize = math.ceil(maxScrollBarHeight * (1 / (scrollCount + 1)))
+  local scrollBarPos
+  if (scrollCount == 0) then
+    scrollBarPos = 0
+  --elseif (pos == scrollCount) then
+    --scrollBarPos = maxScrollBarHeight - scrollBarSize
+  else
+    scrollBarPos = math.floor((maxScrollBarHeight / (scrollCount + 1)) * pos)
+  end
+  
+  ret.size = scrollBarSize
+  ret.pos = scrollBarPos
+  log("Scrollbar size: " .. scrollBarSize)
+  log("Scrollbar pos: " .. scrollBarPos)
+  
+  return ret
+end
+
 -- >>> Path
 
 Path = {}
-function Path:getParent()
-  return Path.getContainerAt(self, #self - 1)
-end
 
+-- Returns the container which is at the paths
+-- nest level.
 function Path:getContainerAt(nestLevel)
   local container = getCurrentWindow()
   
@@ -431,6 +509,8 @@ function Path:getContainerAt(nestLevel)
   return container
 end
 
+-- Returns the object which is represented by the
+-- path.
 function Path:getObject()
   local container = Path.getContainerAt(self, #self - 1)
   return container.children[self[#self]]
@@ -439,6 +519,8 @@ end
 -- Returns the coordinates which are relative to
 -- the last container represented by the path.
 function Path:getRelativePos(x, y, checkFullPath)
+  log("Path.getRelativePos", "FUNC")
+  log("x: " .. x .. ", y: " .. y .. ", checkFullPath: " .. tostring(checkFullPath) .. ".", "ATTR")
   local container
   local limit = checkFullPath and #self or #self - 1
   
@@ -447,9 +529,6 @@ function Path:getRelativePos(x, y, checkFullPath)
     
     if container then
       x, y = objects.Container.getRelativePos(container, x, y)
-      --if not (container.children[self[i + 1]] and container.children[self[i + 1]].isContainer) then
-      --  break
-      --end
     else
       break
     end
@@ -500,6 +579,11 @@ function Buffer.newPixel(backCol, textCol, char, path)
   ret.text = textCol or objectColors.text
   ret.char = (type(char) == "string" and char ~= "") and char or " "
   ret.path = path or nil
+  if (backCol or textCol or char ~= " " or path) then
+    ret.draw = true
+  else
+    ret.draw = false
+  end
   
   return ret;
 end
@@ -552,10 +636,13 @@ function Buffer:draw(x, y)
   for col = 0, self.width - 1 do
     for row = 0, self.height - 1 do
       currentPixel = self.bufferTable[col+1][row+1]
-      out.setCursorPos(x + col, y + row)
-      out.setBackgroundColor(currentPixel.background)
-      out.setTextColor(currentPixel.text)
-      out.write(currentPixel.char)
+      if (currentPixel.draw) then
+        out.setCursorPos(x + col, y + row)
+        out.setBackgroundColor(currentPixel.background)
+        out.setTextColor(currentPixel.text)
+        out.write(currentPixel.char)
+        currentPixel.draw = false
+      end
     end
   end
 end
@@ -580,6 +667,7 @@ function Buffer:setPixel(x, y, pixel)
   assert(x)
   assert(y)
   assert(pixel)
+  
   if (x > 0 and x <= self.width and y > 0 and y <= self.height) then
     for key, value in pairs(pixel) do
       if value then
@@ -611,12 +699,24 @@ function Buffer:addBuffer(x, y, buffer)
   end
 end
 
+-- Adds a border to the container buffer.
+function Buffer:makeBorder(path, color)
+  local width, height = self.width, self.height
+  
+  self:addBuffer(1, 1, objects.Line.get("horizontal", width, color, path))
+  self:addBuffer(1, height, objects.Line.get("horizontal", width, color, path))
+  self:addBuffer(1, 1, objects.Line.get("vertical", height, color, path))
+  self:addBuffer(width, 1, objects.Line.get("vertical", height, color, path))
+end
+
 -- >>> Objects
 
 objects = {}
 -- Returns a new object with its default attributes
 -- depending on the object type.
 function objects.new(objectType, x, y)
+  log("objects.new", "FUNC")
+  
   local object = {}
   local path = Path.getContainerPath(x, y)
   local relativeX, relativeY = Path.getRelativePos(path, x, y, true)
@@ -656,6 +756,11 @@ end
 
 -- Returns the buffer of the object.
 function objects.get(self, param)
+  assert(self)
+  
+  log("objects.get", "FUNC")
+  log(self.objType .. " ID: \"" .. self.objID .. "\", param: \"" .. tostring(param) .. "\"", "ATTR")
+  
   local objType = self.objType or "Unknown"
   if (self.isContainer) then
     return objects.Container.get(self, param)
@@ -667,6 +772,11 @@ function objects.get(self, param)
 end
 
 function objects.remove(self)
+  assert(self)
+  
+  log("objects.remove", "FUNC")
+  log(self.objType .. " ID: \"" .. self.objID .. "\".")
+  
   local path = self.path
   local objKey = path[#path]
   local container = Path.getContainerAt(self.path, #self.path - 1)
@@ -684,7 +794,10 @@ end
 
 -- Draws the object.
 function objects.draw(self, param)
-  local objType = self.objType
+  assert(self)
+  
+  log("objects.draw", "FUNC")
+  log(self.objType .. " ID: " .. self.objID .. ", param: \"" .. tostring(param) .. "\"", "ATTR")
   
   if (#self.path > 1) then
     local container = getCurrentWindow()
@@ -694,10 +807,17 @@ function objects.draw(self, param)
     local buffer = objects.get(self, param)
     buffer:draw(self.x, self.y)
   end
+  
+  drawDefaultButtons()
 end
 
 -- Returns the resulting event and a "params"-array.
 function objects.click(self, x, y)
+  assert(self)
+  
+  log("objects.click", "FUNC")
+  log(self.objType .. " ID: " .. self.objID .. ", x: " .. x .. ", y: " .. y .. ".", "ATTR")
+  
   local objType = self.objType
   local event, params
   if objects[objType] and objects[objType].click then
@@ -712,6 +832,9 @@ end
 -- Moves the object.
 function objects.move(self, addX, addY)
   assert(self)
+  
+  log("objects.click", "FUNC")
+  log(self.objType .. " ID: " .. self.objID .. ", x: " .. x .. ", y: " .. y .. ".", "ATTR")
   
   local objType = self.objType
   
@@ -732,6 +855,11 @@ end
 -- Scales the object.
 function objects.scale(self, x, y)
   assert(self)
+  
+  log("objects.scale", "FUNC")
+  log(self.objType .. " ID: " .. self.objID .. ", x: " .. x .. ", y: " .. y .. ".", "ATTR")
+  log("Object pos: " .. self.x .. ", " .. self.y, "DEBUG")
+  
   local objType = self.objType
   
   if (objects[objType] and objects[objType].scale) then
@@ -839,7 +967,15 @@ objects.Button.get = function(self, buttonColor)
   local height = self.height
   local path = self.path
   local text = self.text
-  local color = buttonColor or objectColors.Button.default
+  local color
+  
+  if buttonColor then
+    color = buttonColor
+  elseif (toggleState[self.objID]) then
+    color = objectColors.Button.active
+  else
+    color = objectColors.Button.default
+  end
   
   local buffer = Buffer:new()
   local textCol = math.floor((width - string.len(text)) / 2) + 1
@@ -866,9 +1002,9 @@ objects.Button.click = function(self, x, y)
     end
     
     if userFunctions[param] then
-      userFunctions[param]()
+      userFunctions[param](true)
     elseif editorFunctions[param] then
-      editorFunctions[param]()
+      editorFunctions[param](true)
     end
     
     if changeButtonColor then
@@ -877,14 +1013,29 @@ objects.Button.click = function(self, x, y)
       changeButtonColor = true
     end
     
-    return "button_clicked", {self.objID}
+    return "button_clicked", {self.objID, true}
+  elseif (actionType == "toggle function") then
+    local state = not toggleState[self.objID]
+    
+    toggleState[self.objID] = state
+    objects.draw(self)
+    
+    if userFunctions[param] then
+      userFunctions[param](state)
+    elseif editorFunctions[param] then
+      editorFunctions[param](state)
+    end
+    
+    return "button_toggled", {self.objID, state}
+  else
+    log("Unknown function type: \"" .. actionType .. "\"", "WARNING")
   end
 end
 
 -- >> Text
 objects.Text = {}
 objects.Text.new = function(self)
-  self.text = "Text"
+  self.text = "newText"
   self.width = #self.text
   self.height = 1
 end
@@ -932,7 +1083,7 @@ objects.Variable.get = function(self, value)
   return buffer
 end
 
--- >> Progress Bar
+-- >> ProgressBar
 objects.ProgressBar = {}
 objects.ProgressBar.new = function(self, maxWidth)
   self.length = (maxWidth < size.ProgressBar.length) and maxWidth or size.ProgressBar.length
@@ -1015,38 +1166,41 @@ end
 -- Move and scale pos is wrong when the progress bar goes up.
 objects.ProgressBar.scale = function(self, x, y)
   local moveX, moveY = objects.getMovePos(self)
+  local relMoveX, relMoveY = Path.getRelativePos(self.path, moveX, moveY)
   local length
   local newX, newY
   local direction
   local width, height
   
-  if (x < moveX and y == moveY) then -- Clicked left of the progressBar.
-    length = moveX - x + 1
-    newX, newY = x, y
+  if (x < relMoveX and y == relMoveY) then -- Clicked left of the progressBar.
+    length = relMoveX - x + 1
     direction = "left"
-    width, height = length, 1
-  elseif (x == moveX and y < moveY) then -- Clicked above the progressBar.
-    length = moveY - y + 1
     newX, newY = x, y
-    direction = "up"
-    width, height = 1, length
-  elseif (x > moveX and y == moveY) then -- Clicked right of the progressBar.
-    length = x - moveX + 1
-    direction = "right"
-    newX, newY = moveX, moveY
     width, height = length, 1
-  elseif (x == moveX and y > moveY) then -- Clicked below the progressBar.
-    length = y - moveY + 1
+  elseif (x == relMoveX and y < relMoveY) then -- Clicked above the progressBar.
+    length = relMoveY - y + 1
+    direction = "up"
+    newX, newY = x, y
+    width, height = 1, length
+  elseif (x > relMoveX and y == relMoveY) then -- Clicked right of the progressBar.
+    length = x - relMoveX + 1
+    direction = "right"
+    newX, newY = relMoveX, relMoveY
+    width, height = length, 1
+  elseif (x == relMoveX and y > relMoveY) then -- Clicked below the progressBar.
+    length = y - relMoveY + 1
     direction = "down"
-    newX, newY = moveX, moveY
+    newX, newY = relMoveX, relMoveY
     width, height = 1, length
   else
     return
   end
   
   if (length > 2) then
-    self.absoluteX, self.absolutey = newX, newY
-    self.x, self.y = Path.getRelativePos(self.path, newX, newY)
+    local xDiff, yDiff = newX - self.x, newY - self.y
+    
+    self.absoluteX, self.absolutey = self.absoluteX + xDiff, self.absoluteY + yDiff
+    self.x, self.y = newX, newY
     self.direction = direction
     self.width, self.height = width, height
     self.length = length
@@ -1132,7 +1286,6 @@ objects.Input.click = function(self)
   out.setBackgroundColor(objectColors.background)
   out.setTextColor(objectColors.text)
   
-  -- NOTE: Changed "return ret" to this one:
   return "text_changed", {self.objID, userInput}
 end
 
@@ -1312,18 +1465,27 @@ objects.Container.contentAreaClicked = function(self, x, y)
   return (x >= left and x <= right and y >= top and y <= bottom)
 end
 
--- Draws the buffer and trims it before if
+-- Draws the buffer and trims it before that if
 -- necessary.
 objects.Container.drawBuffer = function(self, buffer, path, x, y, absoluteX, absoluteY, nestLevel)
+  log("objects.Container.drawBuffer", "FUNC")
+  local modX, modY = objects.Container.modifyObjectPos(self, x, y)
+  x, y = x + modX, y + modY
+  
   if (self.objType ~= "Window") then
     local containerLeft, containerTop, containerRight, containerBottom = 1, 1, self.width - 1, self.height - 1
     local objLeft, objTop, objRight, objBottom = x, y, x + buffer.width - 1, y + buffer.height - 1
+    
+    --log("Container dimensions: left: " .. containerLeft .. ", top: " .. containerTop .. ", right: " .. containerRight .. ", bottom: " ..containerBottom .. ".", "DEBUG")
+    --log("Object dimensions: left: " .. objLeft .. ", top: " .. objTop .. ", right: " .. objRight .. ", bottom: " ..objBottom .. ".", "DEBUG")
+    
     if (objLeft > self.width or
         objTop > self.height or
         objRight < 0 or
         objBottom < 0) then
       return
-    elseif (objLeft < containerLeft or objTop < containerTop or objRight > containerRight or objBottom > containerBottom) then
+    elseif (objLeft < containerLeft or objTop < containerTop or objRight >= containerRight or objBottom >= containerBottom) then
+      -- Object goes over the border. Trim it.
       local trimLeft = (containerLeft - objLeft) > 0 and containerLeft - objLeft or 0
       local trimTop = (containerTop - objTop) > 0 and containerTop - objTop or 0
       local trimRight = (objRight - containerRight + 1) > 0 and objRight - containerRight + 1 or 0
@@ -1346,12 +1508,16 @@ objects.Container.drawBuffer = function(self, buffer, path, x, y, absoluteX, abs
     local relX, relY = objects.Container.getRelativePos(container, x, y)
     objects.Container.drawBuffer(container, buffer, path, relX, relY, absoluteX, absoluteY, nestLevel + 1)
   else
-    buffer:draw(absoluteX, absoluteY)
+    buffer:draw(absoluteX + modX, absoluteY + modY)
   end
 end
 
 objects.Container.getRelativePos = function(self, x, y)
   local left, top, right, bottom = objects.Container.getContentArea(self)
+  
+  --log("objects.Container.getRelativePos", "FUNC")
+  --log(self.objType .. " ID: " .. self.objID .. ", x: " .. x .. ", y: " .. y .. ".", "ATTR")
+  --log("Left: " .. left .. ", top: " .. top .. ", right: " .. right .. ", bottom: " .. bottom .. ".", "DEBUG")
   
   retX = x - left + 1
   retY = y - top + 1
@@ -1366,6 +1532,7 @@ objects.Container.getParentsRelativePos = function(self, x, y)
 end
 
 objects.Container.new = function(self, maxWidth, maxHeight)
+  log("objects.Container.new", "FUNC")
   local defaultWidth, defaultHeight = size.Container.width, size.Container.height
   
   self.isContainer = true
@@ -1374,14 +1541,20 @@ objects.Container.new = function(self, maxWidth, maxHeight)
   self.width = (maxWidth < defaultWidth) and maxWidth or defaultWidth
   self.height = (maxHeight < defaultHeight) and maxHeight or defaultHeight
   
+  log("New container dimensioins: " .. self.width .. " x " .. self.height .. ".")
+  
   if (objects.Container[self.objType].new) then
-    objects.Container[objectType].new(object)
+    objects.Container[self.objType].new(self)
   end
 end
 
 objects.Container.get = function(self)
+  log("Container dimensions: " .. (self.width or "unknown") .. " x " .. (self.height or "unknown") .. ".")
+  
   local left, top, right, bottom = objects.Container.getContentArea(self)
-  local width, height = right - left + 1, bottom - top + 1
+  local minWidth, minHeight = right - left + 1, bottom - top + 1
+  local width, height = getNecessaryBufferSize(self.children, minWidth, minHeight)
+  
   local buffer = Buffer:new()
   buffer:init(width, height, {})
   
@@ -1391,6 +1564,24 @@ objects.Container.get = function(self)
   end
   
   return objects.Container[self.objType].get(self, buffer)
+end
+
+objects.Container.modifyObjectPos = function(self, x, y)
+  assert(self)
+  
+  log("objects.Container.modifyObjectPos", "FUNC")
+  log("Object type: " .. tostring(self.objType) .. ", ID: " .. tostring(self.objID) .. ".", "INFO")
+  log("Position: " .. x .. ", " .. y .. ".", "INFO")
+  
+  local objType = self.objType
+  if (objects.Container[objType] and objects.Container[objType].modifyObjectPos) then
+    local newX, newY = objects.Container[objType].modifyObjectPos(self, x, y)
+    log("Modifier: " .. newX .. ", " .. newY .. ".", "INFO")
+    return newX, newY
+  else
+    log("Position not modified.")
+    return 0, 0
+  end
 end
 
 objects.Container.move = function(self, addX, addY)
@@ -1437,11 +1628,105 @@ end
 
 objects.Container.Panel = {}
 objects.Container.Panel.get = function(self, contentBuffer)
+  log("objects.Container.Panel.get", "FUNC")
   local buffer = Buffer:new()
   buffer:init(self.width, self.height, self.path, objectColors.Container.Panel.border)
   buffer:addBuffer(2, 2, contentBuffer)
+  buffer:addBuffer(self.width, 1, objects.Line.get("vertical", self.height, objectColors.Container.Panel.border, self.path))
+  buffer:addBuffer(1, self.height, objects.Line.get("horizontal", self.width, objectColors.Container.Panel.border, self.path))
   
   return buffer
+end
+
+-- >> ScrollView
+
+objects.Container.ScrollView = {}
+objects.Container.ScrollView.new = function(self)
+  self.scrollX = 0
+  self.scrollY = 0
+  self.maxScrollX = 0
+  self.maxScrollY = 0
+  self.scrollXEnabled = false
+  self.scrollYEnabled = true
+end
+
+objects.Container.ScrollView.get = function(self, contentBuffer)
+  log("objects.Container.ScrollView.get", "FUNC")
+  log("ScrollView (ID: " .. tostring(self.objID) .. ")", "INFO")
+  
+  local buffer = Buffer:new()
+  buffer:init(self.width, self.height, self.path, objectColors.Container.ScrollView.border)
+  buffer:addBuffer(2 - self.scrollX, 2 - self.scrollY, contentBuffer)
+  buffer:makeBorder(self.path, objectColors.Container.ScrollView.border)
+  
+  --local edgePixel = { background=objectColors.Container.ScrollView.border, path=self.path }
+  --buffer:setPixel(self.width, 1, edgePixel)
+  --buffer:setPixel(self.width, self.height, edgePixel)
+  --buffer:setPixel(1, self.height, edgePixel)
+  
+  if (self.scrollXEnabled) then
+    self.maxScrollX = contentBuffer.width - self.width + 1
+    
+    buffer:addBuffer(2, self.height, objects.Line.get("horizontal", self.width - 2, objectColors.Container.ScrollView.scrollBackground))
+    
+    if (self.width > 4) then
+      local scrollBarInfo = getScrollBarInfo(self.scrollX, self.width, contentBuffer.width)
+      buffer:addBuffer(scrollBarInfo.pos + 3, self.height, objects.Line.get("horizontal", scrollBarInfo.size, objectColors.Container.ScrollView.scrollForeground, self.path))
+    end
+    
+    buffer:setPixel(2, self.height, { char="<", path=self.path })
+    buffer:setPixel(self.width - 1, self.height, { char=">", path=self.path })
+  else
+    --buffer:addBuffer(2, self.height, objects.Line.get("horizontal", self.width - 2, objectColors.Container.ScrollView.border, self.path))
+  end
+  
+  if (self.scrollYEnabled) then
+    self.maxScrollY = contentBuffer.height - self.height + 1
+    buffer:addBuffer(self.width, 2, objects.Line.get("vertical", self.height - 2, objectColors.Container.ScrollView.scrollBackground))
+    
+    if (self.height > 4) then
+      local scrollBarInfo = getScrollBarInfo(self.scrollY, self.height, contentBuffer.height)
+      buffer:addBuffer(self.width, scrollBarInfo.pos + 3, objects.Line.get("vertical", scrollBarInfo.size, objectColors.Container.ScrollView.scrollForeground, self.path))
+    end
+    
+    buffer:setPixel(self.width, 2, { char="^", path=self.path })
+    buffer:setPixel(self.width, self.height - 1, { char="V", path=self.path })
+  else
+    --buffer:addBuffer(self.width, 2, objects.Line.get("vertical", self.height - 2, objectColors.Container.ScrollView.border, self.path))
+  end
+  
+  return buffer
+end
+
+objects.Container.ScrollView.click = function(self, x, y)
+  if (x == self.width and y == 2) then -- Up
+    log("Up")
+    if (self.scrollY > 0) then
+      self.scrollY = self.scrollY - 1
+    end
+  elseif (x == self.width and y == self.height - 1) then -- Down
+    log("Down")
+    if (self.scrollY < self.maxScrollY) then
+      self.scrollY = self.scrollY + 1
+    end
+  elseif (x == 2 and y == self.height) then -- Left
+    log("Left")
+    if (self.scrollX > 0) then
+      self.scrollX = self.scrollX - 1
+    end
+  elseif (x == self.width - 1 and y == self.height) then -- Right
+    log("Right")
+    if (self.scrollX < self.maxScrollX) then
+      self.scrollX = self.scrollX + 1
+    end
+  end
+  
+  windowBuffer:addBuffer(self.absoluteX, self.absoluteY, objects.get(self))
+  objects.draw(self)
+end
+
+objects.Container.ScrollView.modifyObjectPos = function(self, x, y)
+  return self.scrollX * -1, self.scrollY * -1
 end
 
 -- >>> Objects that can't be added by the user.
@@ -1449,22 +1734,28 @@ end
 -- >> Line
 
 objects.Line = {}
-objects.Line.get = function(orientation, length, color)
+objects.Line.get = function(orientation, length, color, path)
   if (orientation ~= "horizontal" and orientation ~= "vertical") then
-    orientation = getOrientation(orientation) or error("Orientation " .. orientation .. " is invalid!")
+    orientation = getOrientation(orientation) or error("Orientation " .. orientation .. " is invalid!", 1)
   end
   
   assert(length)
   assert(color)
   
-  local width, height = (orientation == "horizontal") and length, 1 or 1, length
+  local width, height
+  if (orientation == "horizontal") then
+    width, height = length, 1
+  else
+    width, height = 1, length
+  end
+  
   local buffer = Buffer:new()
-  buffer:init(width, height, nil, color)
+  buffer:init(width, height, path, color)
   
   return buffer
 end
 
--- >> Editor objects
+-- >> Selector
 objects.Selector = {}
 objects.Selector.draw = function(x, y, elements)
   width = getLongestString(elements) + 2
@@ -1691,6 +1982,12 @@ function drawBox(x, y, width, height, color)
   for row = 1, height do
     out.setCursorPos(x, y + row - 1)
     out.write(string.rep(" ", width))
+    
+    for col = x, width do
+      if (windowBuffer[col] and windowBuffer[col][y + row - 1]) then
+        windowBuffer[col][y + row - 1].draw = true
+      end
+    end
   end
 end
 
@@ -1730,7 +2027,12 @@ end
 -- of the current window.
 function loadObjects()
   local window = getCurrentWindow()
-  for objectID, object in pairs(window.children) do
+  loadObjectsOf(window)
+end
+
+-- Loads all objects inside the container and its containers (recursive)
+function loadObjectsOf(container)
+  for _, object in pairs(container.children) do
     local objectType = object.objType
     
     if (objectType == "Variable" or objectType == "ProgressBar") then
@@ -1745,6 +2047,8 @@ function loadObjects()
       end
       
       objects.draw(object, value)
+    elseif (object.isContainer) then
+      loadObjectsOf(object)
     end
   end
 end
@@ -1753,7 +2057,7 @@ end
 -- ID windowID on the screen and changes the
 -- variable "currentWindow".
 function drawWindow(windowID)
-  clearScreen()
+  --clearScreen()
   
   if windowID then
     currentWindow = windowID
@@ -1770,7 +2074,6 @@ function drawWindow(windowID)
     loadObjects()
   end
   
-  text.refresh = editMode and "Options" or "Refresh"
   drawDefaultButtons()
 end
 
@@ -1811,16 +2114,22 @@ function pullEvent(requestedEvent)
 end
 
 function getInput()
+  log("getInput", "FUNC")
+  
   local finished = false
   local event, params
   local x, y, mouseButton = getCursorInput()
+  log("Received mouse input. X: " .. x .. ", Y: " .. y .. ", button: " .. mouseButton .. ".", "INFO")
 
   if (defaultButtonPressed("quit", x, y)) then
+    log("Quit pressed")
     quit = true
   elseif (defaultButtonPressed("refresh", x, y)) then
+    log("Refresh pressed")
     drawWindow()
     finished = true
   elseif (defaultButtonPressed("back", x, y)) then
+    log("Back pressed")
     if (windows.children[currentWindow].parent ~= nil) then
       drawWindow(windows.children[currentWindow].parent)
       finished = true
@@ -1838,10 +2147,13 @@ function getInput()
   
   local param
   local path = windowBuffer.bufferTable[x][y].path
+  log(path)
   if path and #path > 0 then
     local object = Path.getObject(path)
     local clickX, clickY = Path.getRelativePos(path, x, y)
-    clickX, clickY = x - object.x + 1, y - object.y + 1
+    clickX, clickY = clickX - object.x + 1, clickY - object.y + 1
+    log(object.objType .. " \"" .. object.objID .. "\" clicked at " .. clickX .. ", " .. clickY .. ".")
+    
     event, params = objects.click(object, clickX, clickY)
   end
   
@@ -1859,35 +2171,7 @@ function getSystemInfo()
   return systemInfo
 end
 
-function callAddOn(object, callType)
-  addOnName = object.addOnName
-  objectID = object.objID
-  x = object.x
-  y = object.y
-  width = object.width
-  height = object.height
-  addOnPath = fs.combine(shell.dir(), addOnName .. addOnExtension)
-  
-  systemInfo = getSystemInfo()
-  systemInfo.x = x
-  systemInfo.y = y
-  systemInfo.width = width
-  systemInfo.height = height
-  
-  if changeButtonColor then
-      objects["Button"].draw(object, objectColors["Button"].active)
-  end
-  
-  shell.run(addOnPath, callType, objectID, textutils.serialize(systemInfo))
-  
-  if changeButtonColor then
-    objects["Button"].draw(button, objectColors["Button"].default)
-  else
-    changeButtonColor = true
-  end
-end
-
--- Shows the message on the computer for debugging. Probably my most-used function.
+-- Shows the message on the computer for debugging.
 function debugMessage(message)
   if outIsTerm then
     error("Can't display a debug message on a computer!")
@@ -1905,25 +2189,78 @@ function main()
   end
 end
 
--- Saves the content of the windows-table into the save file
+-- Converts the serilized text for the save-file into a readable one.
+function saveSerialize(saveText) -- Aaaaah! So messy!
+  local serialized = ""
+  local indentation = 0
+  local indent = false
+  
+  for char in saveText:gmatch(".") do
+    if (char == "{") then
+      indentation = indentation + 1
+      
+      serialized = serialized .. char
+      serialized = serialized .. "\n"
+      indent = true
+    elseif (char == ",") then
+      serialized = serialized .. char .. "\n"
+      indent = true
+    elseif (char == "}") then
+      indentation = indentation - 1
+      serialized = serialized .. string.rep("\t", indentation)
+      serialized = serialized .. char
+      indent = true
+    else
+      if indent then
+        serialized = serialized .. string.rep("\t", indentation)
+        indent = false
+      end
+      
+      serialized = serialized .. char
+    end
+  end
+  
+  serialized = serialized:gsub(" ", "<SPACE>")
+  return serialized
+end
+
+-- Removes any special characters from the loaded
+-- string so that it can be unserialized.
+function saveUnserialize(serialized)
+  local saveText = serialized
+  saveText = saveText:gsub("\n", "")
+  saveText = saveText:gsub("\t", "")
+  saveText = saveText:gsub(" ", "")
+  saveText = saveText:gsub("<SPACE>", " ")
+  
+  return saveText
+end
+
+-- Saves the content of the windows-table into the
+-- save file
 function saveWindows()
-  saveString = textutils.serialize(windows.children)
+  local saveString = textutils.serialize(windows.children)
+  saveString = saveSerialize(saveString)
   file = fs.open(saveFileName, "w")
   file.write(saveString)
   file.close()
 end
 
--- Loads the save file and puts the content into the windows-table
+-- Loads the save file and puts the content into
+-- the windows-table
 function loadWindows()
   if not fs.exists(saveFileName) then
+    objects.Container.Window.create("mainWindow")
     return
   end
   
-  file = fs.open(saveFileName, "r")
-  loadString = file.readAll()
+  local file = fs.open(saveFileName, "r")
+  local loadString = file.readAll()
+  loadString = saveUnserialize(loadString)
   if (loadString ~= nil and loadString ~= "") then
     windows.children = textutils.unserialize(loadString)
   end
+  
   file.close()
 end
 
@@ -1953,21 +2290,21 @@ editorWindows = {
     mainWindow = {
       objType = "Window",
       children = {
-        [1] = { objType="Text", x=2, y=1, text="Mode:", path={1} };
+        [1] = { objType="Text", objID="ModeText", x=2, y=1, text="Mode:", path={1} };
         [2] = { objType="List", x=2, y=3, elements=editActions, objID="editActionList", isMultiselect=false, canClick=true, path={2} };
-        [3] = { objType="Button", x=2, y=7, width=13, height=3, text="Last Window", funcType="function", param="editLastWindow", canClick=true, canScale=true, path={3} };
-        [4] = { objType="Button", x=17, y=7, width=13, height=3, text="Window List", funcType="function", param="loadWindowList", canClick=true, canScale=true, path={4} };
+        [3] = { objType="Button", objID="btnLastWindow", x=2, y=7, width=13, height=3, text="Last Window", funcType="function", param="editLastWindow", canClick=true, canScale=true, path={3} };
+        [4] = { objType="Button", objID="btnWindowList", x=17, y=7, width=13, height=3, text="Window List", funcType="function", param="loadWindowList", canClick=true, canScale=true, path={4} };
       };
     };
     
     windowListWindow = {
       objType = "Window",
       children = {
-        [1] = { objType="List", x=2, y=2, elements=windowList, objID="windowList", isMultiselect=false, canClick=true, path={1} };
-        [2] = { objType="Button", x=2, y=maxY-6, width=12, height=1, text="Set parent", funcType="function", param="setParent", canClick=true, canScale=true, path={2} };
-        [3] = { objType="Button", x=2, y=maxY-4, width=8, height=1, text="New", funcType="function", param="newWindow", canClick=true, canScale=true, path={3} };
-        [4] = { objType="Button", x=2, y=maxY-3, width=8, height=1, text="Edit", funcType="function", param="editWindow", canClick=true, canScale=true, path={4} };
-        [5] = { objType="Button", x=2, y=maxY-2, width=8, height=1, text="Delete", funcType="function", param="deleteWindow", canClick=true, canScale=true, path={5} };
+        [1] = { objType="List", objID="WindowList", x=2, y=2, elements=windowList, objID="windowList", isMultiselect=false, canClick=true, path={1} };
+        [2] = { objType="Button", objID="SetParent", x=2, y=maxY-6, width=12, height=1, text="Set parent", funcType="function", param="setParent", canClick=true, canScale=true, path={2} };
+        [3] = { objType="Button", objID="NewWindow", x=2, y=maxY-4, width=8, height=1, text="New", funcType="function", param="newWindow", canClick=true, canScale=true, path={3} };
+        [4] = { objType="Button", objID="EditWindow", x=2, y=maxY-3, width=8, height=1, text="Edit", funcType="function", param="editWindow", canClick=true, canScale=true, path={4} };
+        [5] = { objType="Button", objID="DeleteWindow", x=2, y=maxY-2, width=8, height=1, text="Delete", funcType="function", param="deleteWindow", canClick=true, canScale=true, path={5} };
       };
     };
   };
@@ -2154,6 +2491,8 @@ end
 -- Let's the user delete an object or change its attributes depending on the current edit-mode.
 function editObject(object)
   assert(object)
+  log("editObject", "FUNC")
+  log("Type: " .. object.objType .. ", ID" .. object.objID, "INFO")
   
   local objType = object.objType
   local left, top, right, bottom = objects.getDimensions(object)
@@ -2174,6 +2513,8 @@ function editObject(object)
       funcType = true,
       isPassword = true,
       isMultiselect = true,
+      scrollXEnabled = true,
+      scrollYEnabled = true,
     }
     
     index = 1
@@ -2213,8 +2554,7 @@ function editObject(object)
         if (selectedAttr == "param" or
             selectedAttr == "objID" or
             selectedAttr == "message" or
-            selectedAttr == "elements" or
-            selectedAttr == "message") then
+            selectedAttr == "elements") then
           
           if outIsTerm then
             out.setCursorPos(1, y)
@@ -2238,20 +2578,25 @@ function editObject(object)
           userInput = readUserInput("Please enter a value for the " .. selectedAttr .. ".", false)
           if (userInput ~= nil) then
             object[selectedAttr] = userInput
-            object.width = #userInput
+            
+            if (object.objType == "Text") then
+              object.width = #userInput
+            end
           end
         elseif (selectedAttr == "funcType") then -- Button attribute
           if (object.funcType == "switch") then
             object[selectedAttr] = "function"
+          elseif (object.funcType == "function") then
+            object[selectedAttr] = "toggle function"
           else
             object[selectedAttr] = "switch"
           end
-        elseif (selectedAttr == "isPassword" or selectedAttr == "isMultiselect") then
-          if (object[selectedAttr]) then
-            object[selectedAttr] = false
-          else
-            object[selectedAttr] = true
-          end
+        elseif (selectedAttr == "isPassword" or 
+                selectedAttr == "isMultiselect" or
+                selectedAttr == "toggle" or
+                selectedAttr == "scrollXEnabled" or
+                selectedAttr == "scrollYEnabled") then
+          object[selectedAttr] = not object[selectedAttr]
         end
         drawPixel(1, y, colors.black)
         if (not finished and selectedAttr ~= nil) then
@@ -2350,6 +2695,8 @@ function markDefaultButtons()
 end
 
 function getEditorInput()
+  log("getEditorInput", "FUNC")
+  
   local event
   local x, y, mouseButton
   
@@ -2360,6 +2707,7 @@ function getEditorInput()
     
     if (event.eventType == "mouse") then
       x, y, mouseButton = event.x, event.y, event.mouseButton
+      log("Received mouse input. X: " .. x .. ", Y: " .. y .. ", button: " .. mouseButton .. ".")
     end
   end
   
@@ -2379,6 +2727,9 @@ function getEditorInput()
     windows.children[currentWindow].showBackButton = not windows.children[currentWindow].showBackButton
   else
     local container = getCurrentWindow()
+    
+    --log("Buffer table width: " .. #windowBuffer.bufferTable, "DEBUG")
+    --log("Buffer table height: " .. #windowBuffer.bufferTable[1], "DEBUG")
     local path = windowBuffer.bufferTable[x][y].path
     
     if (path == nil or #path == 0) then -- No object touched. Draw selector for new object.
@@ -2442,14 +2793,68 @@ function printInfo()
   print("info - Shows some info about the program... but I guess you know that already.")
   print("edit - Starts the program in edit-mode.")
   print()
-  print("Visit the CC-forums or my YouTube channel (LPF1337) for news and help.")
+  print("Visit the CC-forums or my YouTube channel (Encreedem CP) for news and help.")
 end
 
+-- Gets called when Graffiti gets the argument "test"
 function testMethod()
-  error("Nothing to test...")
+  error("Nothing to test...", 2)
 end
 
 -- >>> initialization
+-- Initializes the default buttons.
+-- (Quit, Back, Refresh, Options)
+function initDefaultButtons()
+  defaultButtons.quit = {
+    text=text.quit,
+    left=maxX - string.len(text.quit) + 1,
+    top=1,
+    right=maxX,
+    bottom=1,
+    required = function()
+      return true
+    end
+  }
+  
+  defaultButtons.back = {
+    text = text.back,
+    left = 1,
+    top = 1,
+    right = string.len(text.back),
+    bottom = 1,
+    required = function()
+      return getCurrentWindow().showBackButton
+    end
+  }
+  
+  defaultButtons.refresh = {
+    text = text.refresh,
+    left = maxX - string.len(text.refresh) + 1,
+    top = maxY,
+    right = maxX,
+    bottom = maxY,
+    required = function()
+      return (getCurrentWindow().showRefreshButton or (editMode and not showEdtorOptions))
+    end
+  }
+  
+  defaultButtons.options = {
+    text = text.options,
+    left = 1,
+    top = maxY,
+    right = string.len(text.options),
+    bottom = maxY,
+    required=function()
+      return (editMode and not showEditorOptions)
+    end
+  }
+end
+
+function initWindows()
+  for _, window in pairs(windows) do
+    window.width, window.height = maxX, maxY
+  end
+end
 
 -- Tells the user that the monitor or computer
 -- doesn't support colors.
@@ -2528,6 +2933,11 @@ function init()
   
   isAPI = (shell == nil)
   
+  local logFile = fs.combine(logFilePath, logFileName)
+  if (fs.exists(logFile)) then
+    fs.delete(logFile)
+  end
+  
   initDone = true
   return true
 end
@@ -2552,14 +2962,17 @@ function checkArgs()
 end
 
 if init() then
+  log("Graffiti initialized.")
   loadWindows()
+  initWindows()
   initDefaultButtons()
   
   if not isAPI then
     loadWindows()
     checkArgs()
     
-    if editMode then
+    -- Closing Program
+    if editMode and saveAfterQuit then
       saveWindows()
     end
     
