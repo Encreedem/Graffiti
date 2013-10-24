@@ -36,3 +36,4 @@ v1.6.1
 - Added "toggle" function type for buttons.
 - Added ScrollView container.
 - Improved the save-file.
+- Improved performance of window drawing.
