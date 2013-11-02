@@ -1,11 +1,6 @@
--- Author: Encreedem
--- Link: http://www.computercraft.info/forums2/index.php?/topic/13944-161-graffiti-the-first-ide-for-guis/
-
--- Notes to myself:
 -- TODO: The Progress Bars movePos and scalePos get messed up when it's facing up.
--- TODO: Replace "get...Value()" with "objects.ObjectType.load()"
 
-local version = "1.6.2"
+local version = "1.6.1"
 
 -- >>> Variables
 
@@ -27,10 +22,11 @@ text.quit = " X "
 text.refresh = "Refresh"
 text.done = "Done"
 text.options = "Options"
---text.fileSelector = "[...]"
+text.fileSelector = "[...]"
 
 -- Colors
 local objectColors = {}
+local colorTheme = "Default"
 
 -- Color Themes
 local colorThemes = {}
@@ -48,7 +44,6 @@ colorThemes.Default = {
     move = colors.magenta;
     scale = colors.pink;
     marker = colors.gray;
-    editMarker = colors.lime;
     alignmentTrue = colors.lime;
     alignmentFalse = colors.red;
   };
@@ -78,7 +73,6 @@ colorThemes["Windows CC"] = {
     move = colors.magenta;
     scale = colors.pink;
     marker = colors.gray;
-    editMarker = colors.lightBlue;
     alignmentTrue = colors.lime;
     alignmentFalse = colors.red;
   };
@@ -94,7 +88,9 @@ colorThemes["Windows CC"] = {
   };
 }
 
-objectColors = colorThemes.Default
+for key, value in pairs(colorThemes[colorTheme]) do
+  objectColors[key] = value
+end
 
 -- Sizes
 local size = {}
@@ -103,10 +99,10 @@ size.ProgressBar = { length = 10; }
 size.Container = { width = 20; height = 10; }
 
 -- Files Info
-local root = "/" -- The path where the data-folder will be created by default.
-local dataFolderPath = nil
-local loadedFiles = {}
-local currentProject = "Default"
+local saveFileName = "Graffiti.sav"
+local logFilePath = "GraffitiLog"
+local logFileName = "Graffiti.log"
+local logFileHandler = nil
 
 -- API
 local initDone = false
@@ -143,15 +139,7 @@ local autoLoadObjects = true
 local changeButtonColor = true
 local currentWindow = "mainWindow"
 
--- Settings
-local settings = {}
-settings.root = root
-settings.startupProject = currentProject
-settings.language = "en-US"
-settings.colorTheme = "Default"
-settings.hideDataFolder = false
-
--- >> User Code: (This section is just for YOU! :D)
+-- >> User Code: (This section is just for YOU!)
 
 -- user variables
 local randomValue= 50
@@ -250,407 +238,48 @@ function dBug(text)
   getKeyInput()
 end
 
--- Checks whether the table contains the given content-parameter.
-function tableContains(tbl, content)
-  if (tbl and type(tbl) == "table") then
-    for _, value in pairs(tbl) do
-      if (value == content) then
-        return true
-      end
-    end
-    
-    return false
-  else
-    return false
-  end
-end
-
--- >> Files
-local Files = {}
-
--- Returns whether the filename ends with the
--- given extension.
-function Files.endsWith(filename, extension)
-  assert(filename)
-  assert(extension)
-  
-  local sStart, sEnd = string.find(filename, extension, (#extension * -1))
-  return (sStart ~= nil)
-end
-
--- Serializes a normal or serialized table into a
--- readable format which can be saved in a file.
-function Files.serialize(toSave)
-  local saveText
-  local serialized = ""
-  local indentation = 0
-  local indent = false
-  
-  if (type(toSave) == "string") then
-    saveText = toSave
-  elseif (type(toSave) == "table") then
-    saveText = textutils.serialize(toSave)
-  else
-    error("Can't save variable of type .. " .. type(toSave) .. "!", 1)
-  end
-  
-  for char in saveText:gmatch(".") do
-    if (char == "{") then
-      indentation = indentation + 1
-      
-      serialized = serialized .. char
-      serialized = serialized .. "\n"
-      indent = true
-    elseif (char == ",") then
-      serialized = serialized .. char .. "\n"
-      indent = true
-    elseif (char == "}") then
-      indentation = indentation - 1
-      serialized = serialized .. string.rep("\t", indentation)
-      serialized = serialized .. char
-      indent = true
-    else
-      if indent then
-        serialized = serialized .. string.rep("\t", indentation)
-        indent = false
-      end
-      
-      serialized = serialized .. char
-    end
-  end
-  
-  serialized = serialized:gsub(" ", "<SPACE>")
-  return serialized
-end
-
--- Unserializes a string that has been serialized
--- using the "Files.serialize" function into a
--- table.
-function Files.unserialize(str)
-  local saveText = str
-  saveText = saveText:gsub("\n", "")
-  saveText = saveText:gsub("\t", "")
-  saveText = saveText:gsub(" ", "")
-  saveText = saveText:gsub("<SPACE>", " ")
-  saveText = textutils.unserialize(saveText)
-  
-  return saveText
-end
-
--- Initializes the Graffiti data folder.
-function Files.init()
-  if (fs.exists(fs.combine(root, ".GraffitiData"))) then
-    dataFolderPath = fs.combine(root, ".GraffitiData")
-  elseif (fs.exists(fs.combine(root, "GraffitiData"))) then
-    dataFolderPath = fs.combine(root, "GraffitiData")
-  else
-    runSetup()
-  end
-  
-  for key, value in pairs(Files) do
-    if (type(value) == "table") then -- If it's an actual file type instead of a function.
-      if (value.autoLoad and value.load) then
-        Files.load(key)
-      end
-    end
-  end
-end
-
--- Saves all files with
-function Files.save()
-  for _, file in pairs(Files) do
-    if (type(file) == "table") then -- If it's an actual file type instead of a function.
-      if (file.autoSave and file.save) then
-        file.save()
-      end
-    end
-  end
-end
-
--- Loads the file and all of its required files.
-function Files.load(fileType)
-  if not tableContains(loadedFiles, fileType) then
-    local loadRequired = Files[fileType].loadRequired
-    
-    if (loadRequired) then
-      for _, value in pairs(loadRequired) do
-        Files.load(value)
-      end
-    end
-    
-    Files[fileType].load()
-    table.insert(loadedFiles, fileType)
-  end
-end
-
-function Files.saveTable(subDir, fileName, tbl)
-  local fileHandle = Files.createDataFile(subDir, fileName, "w")
-  
-  for key, value in pairs(tbl) do
-    fileHandle.writeLine(key .. "=" .. tostring(value))
-  end
-  
-  if fileHandle then
-    fileHandle.close()
-  end
-end
-
-function Files.loadTable(subDir, fileName)
-  local fileHandle = Files.getDataFileHandle(subDir, fileName, "r", false)
-  local ret = {}
-  
-  if not fileHandle then
-    return nil
-  end
-  
-  repeat
-    local line = fileHandle.readLine()
-    
-    if (line ~= nil and line ~= "" and string.find(line, "=")) then
-      local key, value = splitAt(line, "=")
-      ret[key] = value
-    end
-  until line == nil
-  
-  if fileHandle then
-    fileHandle.close()
-  end
-  
-  return ret
-end
-
--- Removes the content of a file.
-function Files.clear(subDir, fileName)
-  local fileHandle = Files.getDataFileHandle(subDir, fileName, "w", false)
-  
-  if fileHandle then
-    fileHandle.close()
-  end
-end
-
--- Returns the path to the sub-directory and
--- creates the folders if necessary.
-function Files.getSubDirPath(subDir)
-  local subDirPath = dataFolderPath
-  
-  for _, dir in pairs(subDir) do
-    subDirPath = fs.combine(subDirPath, dir)
-  
-    if (fs.exists(subDirPath)) then
-      if (not fs.isDir(subDirPath)) then
-        error("Can't create directory " .. dir .. "! A file with that name exists!", 2)
-      end
-    else
-      fs.makeDir(subDirPath)
-    end
-  end
-  
-  return subDirPath
-end
-
--- Returns the handle of an existing file or null.
--- The file will automatically be created if
--- autoCreate is true.
-function Files.getDataFileHandle(subDir, filename, mode, autoCreate)
-  assert(filename)
-  assert(mode)
-  
-  local ret
-  local path
-  
-  -- Create the path to the file if it doesn't exist.
-  if subDir then
-    local subDirPath
-    
-    if (type(subDir) == "string" and subDir ~= "") then
-      subDirPath = fs.combine(dataFolderPath, subDir)
-      path = fs.combine(subDirPath, filename)
-      
-      if (fs.exists(subDirPath)) then
-        if (not fs.isDir(subDirPath)) then
-          error("Can't create directory " .. subDir .. "! A file with that name exists!", 2)
-        end
-      else
-        fs.makeDir(subDirPath)
-      end
-    elseif (type(subDir) == "table") then
-      local subDirPath = Files.getSubDirPath(subDir)
-      path = fs.combine(subDirPath, filename)
-    end
-  else
-    path = fs.combine(dataFolderPath, filename)
-  end
-  
-  if (fs.exists(path) and fs.isReadOnly(path)) then
-    error("File " .. filePath .. " is readonly!", 2)
-  end
-  
-  if (fs.exists(path) or mode == "w") then
-    ret = fs.open(path, mode)
-  elseif (autoCreate) then
-    ret = fs.open(path, "w") or error("Can't open file " .. path, 2)
-  end
-  
-  return ret
-end
-
--- Creates or overrides a file and returns its handle.
-function Files.createDataFile(subDir, filename)
-  return Files.getDataFileHandle(subDir, filename, "w")
-end
-
--- >> Save File
-Files.Save = {}
-
-Files.Save.autoSave = true
-Files.Save.autoLoad = true
-Files.Save.loadRequired = { "Settings" }
-Files.Save.extension = ".window"
-
--- Saves the content of the windows-table into the
--- save file.
-function Files.Save.save()
-  for name, window in pairs(windows.children) do
-    if (type(window) == "table") then
-      local saveString = Files.serialize(window)
-      local fileHandle = Files.createDataFile({ "Save", currentProject }, name .. Files.Save.extension )
-      
-      fileHandle.write(saveString)
-      fileHandle.close()
-    end
-  end
-end
-
--- Loads the save file and puts the content into
--- the windows-table
-function Files.Save.load()
-  local path = fs.combine(dataFolderPath, "Save")
-  path = fs.combine(path, currentProject)
-  
-  if not path or not fs.isDir(path) then
-    return
-  end
-  
-  for _, filename in pairs(fs.list(path)) do
-    local filePath = fs.combine(path, filename)
-    local windowName = string.sub(filename, 1, #filename - #Files.Save.extension)
-    
-    if (not fs.isDir(filePath) and Files.endsWith(filename, Files.Save.extension)) then
-      local fileHandle = Files.getDataFileHandle({ "Save", currentProject }, filename, "r", false)
-      
-      if fileHandle then
-        local loadString = fileHandle.readAll()
-        loadString = Files.unserialize(loadString)
-        
-        if (loadString ~= nil and loadString ~= "") then
-          windows.children[windowName] = loadString
-        end
-        
-        fileHandle.close()
-      end
-    end
-  end
-end
-
--- >> Settings File
-Files.Settings = {}
-Files.Settings.autoSave = true
-Files.Settings.autoLoad = true
-Files.Settings.subDir = nil
-Files.Settings.name = "Graffiti.cfg"
-
-function Files.Settings.init()
-  if not settings then
-    return
-  end
-  
-  for key, value in pairs(settings) do
-    if (key == "startupProject") then
-      currentProject = value
-    elseif (key == "language") then
-      settings.language = value
-    elseif (key == "colorTheme" and colorThemes[value]) then
-      objectColors = colorThemes[value]
-    end
-  end
-end
-
--- Creates the settings file in the data-folder and fills it with default values.
-function Files.Settings.save()
-  Files.saveTable(Files.Settings.subDir, Files.Settings.name, settings)
-end
-
--- Loads the settings file.
-function Files.Settings.load()
-  local tbl = Files.loadTable(Files.Settings.subDir, Files.Settings.name)
-  
-  if tbl then
-    for key, value in pairs(tbl) do
-      settings[key] = value
-    end
-  end
-  
-  Files.Settings.init()
-end
-
--- >> Language File
-
-Files.Language = {
-  autoSave = true;
-  autoLoad = true;
-  subDir = "Language";
-  extension = ".lang";
-  loadRequired = { "Settings" };
-}
-
-function Files.Language.save()
-  local fileName = "Graffiti." .. settings.language .. Files.Language.extension
-  Files.saveTable(Files.Language.subDir, fileName, text)
-end
-
-function Files.Language.load()
-  local fileName = "Graffiti." .. settings.language .. Files.Language.extension
-  local tbl = Files.loadTable(Files.Language.subDir, fileName)
-  
-  if tbl then
-    for key, value in pairs(tbl) do
-      text[key] = value
-    end
-  end
-end
-
--- >> Log File
-Files.Log = {
-  autoSave = false;
-  autoLoad = false;
-  subDir = "Log";
-  name = "Graffiti.log";
-}
-
 -- Writes the text into a logfile.
 function log(text, logType)
   if not doLog then
     return
   end
   
-  local logFileHandle = Files.getDataFileHandle(Files.Log.subDir, Files.Log.name, "a", true)
+  if (not fs.exists(logFilePath)) then
+    if (fs.isDir(logFilePath)) then
+      error("Can't create directory " .. logFilePath .. "! A file with that name exists!", 0)
+    else
+      fs.makeDir(logFilePath)
+    end
+  end
+  
+  local filePath = fs.combine(logFilePath, logFileName)
+  
+  if (fs.exists(filePath) and fs.isReadOnly(filePath)) then
+    error("File " .. filePath .. " is readonly!", 0)
+  end
+  
+  if (fs.exists(filePath)) then
+    logFileHandler = fs.open(filePath, "a")
+  else
+    logFileHandler = fs.open(filePath, "w")
+  end
   
   if (type(text) == "table") then
     local delimiter = ""
     
-    logFileHandle.write((logType or "INFO") .. ": ")
+    logFileHandler.write((logType or "INFO") .. ": ")
     
     for key, value in pairs(text) do
-      logFileHandle.write(delimiter .. key .. "=" .. tostring(value))
+      logFileHandler.write(delimiter .. key .. "=" .. tostring(value))
       delimiter = ", "
     end
     
-    logFileHandle.writeLine()
+    logFileHandler.writeLine()
   else
-    logFileHandle.writeLine((logType or "INFO") .. ": " .. tostring(text))
+    logFileHandler.writeLine((logType or "INFO") .. ": " .. tostring(text))
   end
   
-  logFileHandle.close()
+  logFileHandler.close()
 end
 
 -- >>> Shortcut functions (for key inputs)
@@ -671,7 +300,7 @@ shortcut[31] = function()
   out.setCursorPos(1, 1)
   print("Saving windows...")
   
-  Files.Save.save()
+  saveWindows()
   
   print("Windows saved!")
   print("Press any key to continue...")
@@ -1085,7 +714,6 @@ end
 objects = {}
 -- Returns a new object with its default attributes
 -- depending on the object type.
--- Note: Don't call this function, use objects.create!
 function objects.new(objectType, x, y)
   log("objects.new", "FUNC")
   
@@ -1096,11 +724,10 @@ function objects.new(objectType, x, y)
   object.objID = "new" .. objectType
   object.objType = objectType
   object.path = path
-  local modX, modY = objects.getPosModifier(object, true)
-  object.x = relativeX + (modX * -1)
-  object.y = relativeY + (modY * -1)
-  object.absoluteX = x + (modX * -1)
-  object.absoluteY = y + (modY * -1)
+  object.x = relativeX
+  object.y = relativeY
+  object.absoluteX = x
+  object.absoluteY = y
   
   local maxWidth = maxX - x
   local maxHeight = maxY - y
@@ -1110,7 +737,7 @@ function objects.new(objectType, x, y)
   elseif (objects.Container[objectType]) then
     objects.Container.new(object, maxWidth, maxHeight)
   else
-    objects.Unknown.new(objectType)
+    objects["Unknown"].new(objectType)
   end
   
   return object
@@ -1127,47 +754,6 @@ function objects.create(objType, x, y)
   objects.draw(object)
 end
 
-function objects.getPosModifier(self, checkFullPath)
-  assert(self)
-  
-  local x, y = 0, 0
-  local maxNestLevel = checkFullPath and #self.path or #self.path - 1
-  
-  if (maxNestLevel > 0) then
-    for nestLevel = 1, maxNestLevel do
-      local object = Path.getContainerAt(self.path, nestLevel)
-      local modX, modY = objects.Container.getPosModifier(object, x, y)
-      x, y = x + modX, y + modY
-    end
-  end
-  
-  return x, y
-end
-
--- Returns the relative position of the object
--- including the possible modifications of its
--- containers.
-function objects.getRelativePos(self)
-  assert(self)
-  
-  local x, y = self.x, self.y
-  local modX, modY = objects.getPosModifier(self)
-  
-  return x + modX, y + modY
-end
-
--- Returns the absolute position of the object
--- including the possible modifications of its
--- containers.
-function objects.getAbsolutePos(self)
-  assert(self)
-  
-  local x, y = self.absoluteX, self.absoluteY
-  local modX, modY = objects.getPosModifier(self)
-  
-  return x + modX, y + modY
-end
-
 -- Returns the buffer of the object.
 function objects.get(self, param)
   assert(self)
@@ -1182,24 +768,6 @@ function objects.get(self, param)
     return objects[objType].get(self, param)
   else
     error("Can't get buffer of object type \"" .. objType .. "\"!")
-  end
-end
-
---[[ Used to return the buffer of an object which
-shows the user where to click to interact with
-the object in a certain way.
-(e.g. scrolling the ScrollView)
-]]
-function objects.addMarker(self, buffer)
-  assert(self)
-  
-  log("objects.addMarker", "FUNC")
-  log(self.objType .. " ID: \"" .. self.objID .. "\".", "ATTR")
-  
-  if (objects[self.objType] and objects[self.objType].addMarker) then
-    objects[self.objType].addMarker(self, buffer)
-  elseif (objects.Container[self.objType] and objects.Container[self.objType].addMarker) then
-    objects.Container[self.objType].addMarker(self, buffer)
   end
 end
 
@@ -1225,22 +793,18 @@ function objects.remove(self)
 end
 
 -- Draws the object.
-function objects.draw(self, param, drawMarker)
+function objects.draw(self, param)
   assert(self)
   
   log("objects.draw", "FUNC")
   log(self.objType .. " ID: " .. self.objID .. ", param: \"" .. tostring(param) .. "\"", "ATTR")
   
-  local buffer = objects.get(self, param)
-  if drawMarker then
-    objects.addMarker(self, buffer)
-  end
-  
   if (#self.path > 1) then
     local container = getCurrentWindow()
     local x, y = self.absoluteX, self.absoluteY
-    objects.Container.drawBuffer(container, buffer, self.path, x, y, x, y, 0)
+    objects.Container.drawBuffer(container, objects.get(self, param), self.path, x, y, x, y, 0)
   else
+    local buffer = objects.get(self, param)
     buffer:draw(self.x, self.y)
   end
   
@@ -1265,31 +829,11 @@ function objects.click(self, x, y)
   return event, params
 end
 
--- Gets called when an object gets clicked in edit
--- mode. Returns false if the object should be
--- edited as usual (move, scale).
-function objects.editorClick(self, x, y)
-  assert(self)
-  assert(x)
-  assert(y)
-  
-  log("objects.editorClick", "FUNC")
-  log(self.objType .. " ID: \"" .. self.objID .. "\", x: " .. x .. ", y: " .. y .. ".", "ATTR")
-  
-  if (objects[self.objType] and objects[self.objType].editorClick) then
-    return objects[self.objType].editorClick(self, x, y)
-  elseif (objects.Container[self.objType] and objects.Container[self.objType].editorClick) then
-    return objects.Container[self.objType].editorClick(self, x, y)
-  else
-    return false
-  end
-end
-
 -- Moves the object.
 function objects.move(self, addX, addY)
   assert(self)
   
-  log("objects.move", "FUNC")
+  log("objects.click", "FUNC")
   log(self.objType .. " ID: " .. self.objID .. ", x: " .. x .. ", y: " .. y .. ".", "ATTR")
   
   local objType = self.objType
@@ -1341,7 +885,7 @@ function objects.getMovePos(self)
   elseif (self.isContainer and objects.Container[objType] and objects.Container[objType].getMovePos) then
     return objects.Container[objType].getMovePos(self)
   else
-    return objects.getAbsolutePos(self)
+    return self.absoluteX, self.absoluteY
   end
 end
 
@@ -1359,8 +903,7 @@ function objects.getScalePos(self)
   elseif (self.isContainer and objects.Container[objType].getScalePos) then
     objects.Container[objType].getScalePos(self)
   else
-    local x, y = objects.getAbsolutePos(self)
-    return x + self.width - 1, y + self.height - 1
+    return self.absoluteX + self.width - 1, self.absoluteY + self.height - 1
   end
 end
 
@@ -1389,6 +932,20 @@ end
 
 objects.Unknown.get = function(self)
   error("Tried to get the buffer of and unknown object!")
+end
+
+objects.Unknown.draw = function(self)
+  assert(self, "Draw function got called with nil parameter!")
+  
+  local x = self.x
+  local y = self.y
+  
+  if (x and y) then
+    out.setCursorPos(x, y)
+    out.write("?")
+  else
+    error("Tried to draw invalid object!")
+  end
 end
 
 -- >> Button
@@ -1516,9 +1073,7 @@ end
 objects.Variable.get = function(self, value)
   local buffer = Buffer:new()
   
-  if editMode and not showEditorOptions then
-    buffer:init(1, 1, self.path, objectColors.Editor.marker)
-  elseif value then
+  if value then
     buffer:init(string.len(value), 1, self.path)
     buffer:addText(1, 1, value)
   else
@@ -1584,7 +1139,7 @@ end
 objects.ProgressBar.getMovePos = function(self)
   local dir = self.direction
   local length = self.length
-  local x, y = objects.getAbsolutePos(self)
+  local x, y = self.absoluteX, self.absoluteY
   
   if (dir == "left") then
     return x + length - 1, y
@@ -1598,7 +1153,7 @@ end
 objects.ProgressBar.getScalePos = function(self)
   local dir = self.direction
   local length = self.length
-  local x, y = objects.getAbsolutePos(self)
+  local x, y = self.absoluteX, self.absoluteY
   
   if (dir == "right") then
     return x + length - 1, y
@@ -1914,7 +1469,7 @@ end
 -- necessary.
 objects.Container.drawBuffer = function(self, buffer, path, x, y, absoluteX, absoluteY, nestLevel)
   log("objects.Container.drawBuffer", "FUNC")
-  local modX, modY = objects.Container.getPosModifier(self, x, y)
+  local modX, modY = objects.Container.modifyObjectPos(self, x, y)
   x, y = x + modX, y + modY
   
   if (self.objType ~= "Window") then
@@ -2011,16 +1566,16 @@ objects.Container.get = function(self)
   return objects.Container[self.objType].get(self, buffer)
 end
 
-objects.Container.getPosModifier = function(self, x, y)
+objects.Container.modifyObjectPos = function(self, x, y)
   assert(self)
   
-  log("objects.Container.getPosModifier", "FUNC")
+  log("objects.Container.modifyObjectPos", "FUNC")
   log("Object type: " .. tostring(self.objType) .. ", ID: " .. tostring(self.objID) .. ".", "INFO")
   log("Position: " .. x .. ", " .. y .. ".", "INFO")
   
   local objType = self.objType
-  if (objects.Container[objType] and objects.Container[objType].getPosModifier) then
-    local newX, newY = objects.Container[objType].getPosModifier(self, x, y)
+  if (objects.Container[objType] and objects.Container[objType].modifyObjectPos) then
+    local newX, newY = objects.Container[objType].modifyObjectPos(self, x, y)
     log("Modifier: " .. newX .. ", " .. newY .. ".", "INFO")
     return newX, newY
   else
@@ -2170,56 +1725,8 @@ objects.Container.ScrollView.click = function(self, x, y)
   objects.draw(self)
 end
 
-objects.Container.ScrollView.getPosModifier = function(self, x, y)
+objects.Container.ScrollView.modifyObjectPos = function(self, x, y)
   return self.scrollX * -1, self.scrollY * -1
-end
-
-objects.Container.ScrollView.addMarker = function(self, buffer)
-  
-  if not (self.scrollXEnabled and self.scrollYEnabled) then
-    if (not self.scrollXEnabled and self.width > 2) then
-      buffer:addBuffer(2, self.height, objects.Line.get("horizontal", self.width - 2, objectColors.Editor.editMarker))
-    end
-    
-    if (not self.scrollYEnabled and self.height > 2) then
-      buffer:addBuffer(self.width, 2, objects.Line.get("vertical", self.height - 2, objectColors.Editor.editMarker))
-    end
-  end
-end
-
-objects.Container.ScrollView.editorClick = function(self, x, y)
-  -- Check whether an arrow has been clicked.
-  if (self.scrollYEnabled and x == self.width and y == 2) then -- Up
-    log("Up")
-    if (self.scrollY > 0) then
-      self.scrollY = self.scrollY - 1
-    end
-    
-    return true
-  elseif (self.scrollYEnabled and x == self.width and y == self.height - 1) then -- Down
-    log("Down")
-    self.scrollY = self.scrollY + 1
-    return true
-  elseif (self.scrollXEnabled and x == 2 and y == self.height) then -- Left
-    log("Left")
-    if (self.scrollX > 0) then
-      self.scrollX = self.scrollX - 1
-    end
-    
-    return true
-  elseif (self.scrollXEnabled and x == self.width - 1 and y == self.height) then -- Right
-    log("Right")
-    self.scrollX = self.scrollX + 1
-    return true
-  else -- Check whether the scrollBar has been clicked.
-    if (x >= 1 and x <= self.width - 1 and y == self.height) then
-      self.scrollXEnabled = not self.scrollXEnabled
-    elseif (x == self.width and y > 1 and y < self.height - 1) then
-      self.scrollYEnabled = not self.scrollYEnabled
-    end
-  end
-  
-  return false
 end
 
 -- >>> Objects that can't be added by the user.
@@ -2653,6 +2160,17 @@ function getInput()
   return event, params
 end
 
+-- Returns a table with most informations that an AddOn would need.
+function getSystemInfo()
+  systemInfo = {}
+  systemInfo.maxX = maxX
+  systemInfo.maxY = maxY
+  systemInfo.selectedItems = selectedItems
+  systemInfo.userInputs = userInputs
+  
+  return systemInfo
+end
+
 -- Shows the message on the computer for debugging.
 function debugMessage(message)
   if outIsTerm then
@@ -2671,6 +2189,81 @@ function main()
   end
 end
 
+-- Converts the serilized text for the save-file into a readable one.
+function saveSerialize(saveText) -- Aaaaah! So messy!
+  local serialized = ""
+  local indentation = 0
+  local indent = false
+  
+  for char in saveText:gmatch(".") do
+    if (char == "{") then
+      indentation = indentation + 1
+      
+      serialized = serialized .. char
+      serialized = serialized .. "\n"
+      indent = true
+    elseif (char == ",") then
+      serialized = serialized .. char .. "\n"
+      indent = true
+    elseif (char == "}") then
+      indentation = indentation - 1
+      serialized = serialized .. string.rep("\t", indentation)
+      serialized = serialized .. char
+      indent = true
+    else
+      if indent then
+        serialized = serialized .. string.rep("\t", indentation)
+        indent = false
+      end
+      
+      serialized = serialized .. char
+    end
+  end
+  
+  serialized = serialized:gsub(" ", "<SPACE>")
+  return serialized
+end
+
+-- Removes any special characters from the loaded
+-- string so that it can be unserialized.
+function saveUnserialize(serialized)
+  local saveText = serialized
+  saveText = saveText:gsub("\n", "")
+  saveText = saveText:gsub("\t", "")
+  saveText = saveText:gsub(" ", "")
+  saveText = saveText:gsub("<SPACE>", " ")
+  
+  return saveText
+end
+
+-- Saves the content of the windows-table into the
+-- save file
+function saveWindows()
+  local saveString = textutils.serialize(windows.children)
+  saveString = saveSerialize(saveString)
+  file = fs.open(saveFileName, "w")
+  file.write(saveString)
+  file.close()
+end
+
+-- Loads the save file and puts the content into
+-- the windows-table
+function loadWindows()
+  if not fs.exists(saveFileName) then
+    objects.Container.Window.create("mainWindow")
+    return
+  end
+  
+  local file = fs.open(saveFileName, "r")
+  local loadString = file.readAll()
+  loadString = saveUnserialize(loadString)
+  if (loadString ~= nil and loadString ~= "") then
+    windows.children = textutils.unserialize(loadString)
+  end
+  
+  file.close()
+end
+
 function splitAt(self, delimiter)
   delimiterPos = string.find(self, delimiter)
   left = string.sub(self, 1, delimiterPos - 1)
@@ -2682,10 +2275,11 @@ end
 -- >>> Editor
 
 function generateWindowList()
-  local ret = {}
-  
+  ret = { "mainWindow" }
   for key, value in pairs(windows.children) do
-    table.insert(ret, key)
+    if (key ~= "mainWindow") then
+      table.insert(ret, key)
+    end
   end
   
   return ret
@@ -2901,9 +2495,7 @@ function editObject(object)
   log("Type: " .. object.objType .. ", ID" .. object.objID, "INFO")
   
   local objType = object.objType
-  local modX, modY = objects.getPosModifier(object)
   local left, top, right, bottom = objects.getDimensions(object)
-  left, top, right, bottom = left + modX, top + modY, right + modX, bottom + modY
   local actionsList = editorWindows.children.mainWindow.children[2]
   local action = editActions[objects.List.getFirstSelectedKey(actionsList)]
   
@@ -2932,7 +2524,6 @@ function editObject(object)
         index = index + 1
       end
     end
-    table.sort(objAttr)
     
     out.clear()
     
@@ -3025,8 +2616,6 @@ function editObject(object)
     local moveX, moveY = objects.getMovePos(object)
     local scaleX, scaleY
     
-    objects.draw(object, nil, true) -- Draw the object with its markers.
-    
     if object.canScale then
       scaleX, scaleY = objects.getScalePos(object)
       drawPixel(scaleX, scaleY, objectColors.Editor.scale)
@@ -3049,12 +2638,11 @@ function editObject(object)
         drawPixel(scaleX, scaleY, objectColors.Editor.active)
         out.setBackgroundColor(objectColors.background)
         local x, y, mouseButton = getCursorInput()
-        relX, relY = Path.getRelativePos(object.path, x, y)
+        local relX, relY = Path.getRelativePos(object.path, x, y)
         
-        objects.scale(object, relX + (modX * -1), relY + (modY * -1))
-      else
-        relX, relY = relX - object.x + 1, relY - object.y + 1
-        objects.editorClick(object, relX + modX, relY + modY)
+        objects.scale(object, relX, relY)
+      else -- clicked something else inside the object (no idea what I could use this for)
+        
       end
     end
   end
@@ -3070,8 +2658,7 @@ function markVariables(container)
     if (object.isContainer) then
       markVariables(object)
     elseif (object.objType == "Variable") then
-      local x, y = objects.getAbsolutePos(object)
-      drawPixel(x, y, objectColors.Editor.marker)
+      drawPixel(object.absoluteX, object.absoluteY, objectColors.Editor.marker)
       out.setBackgroundColor(objectColors.background)
     end
   end
@@ -3114,7 +2701,7 @@ function getEditorInput()
   local x, y, mouseButton
   
   if not showEditorOptions then
-    --markVariables(getCurrentWindow())
+    markVariables(getCurrentWindow())
     markDefaultButtons()
     event = getAnyInput()
     
@@ -3172,7 +2759,6 @@ function getEditorInput()
   end
 end
 
--- Runs Graffiti in editMode.
 function windowEditor()
   editMode = true
   autoLoadObjects = false
@@ -3183,6 +2769,8 @@ function windowEditor()
     getEditorInput()
   end
 end
+
+-- >>> Screen size adaption
 
 function round(number)
   assert(number)
@@ -3214,14 +2802,6 @@ function testMethod()
 end
 
 -- >>> initialization
-
--- Runs the setup.
-function runSetup(useDefaultSettings)
-  dataFolderPath = fs.combine(root, "GraffitiData")
-  fs.makeDir(dataFolderPath)
-  -- TODO: Make an actual setup.
-end
-
 -- Initializes the default buttons.
 -- (Quit, Back, Refresh, Options)
 function initDefaultButtons()
@@ -3271,7 +2851,7 @@ function initDefaultButtons()
 end
 
 function initWindows()
-  for _, window in pairs(windows.children) do
+  for _, window in pairs(windows) do
     window.width, window.height = maxX, maxY
   end
 end
@@ -3353,6 +2933,11 @@ function init()
   
   isAPI = (shell == nil)
   
+  local logFile = fs.combine(logFilePath, logFileName)
+  if (fs.exists(logFile)) then
+    fs.delete(logFile)
+  end
+  
   initDone = true
   return true
 end
@@ -3377,18 +2962,18 @@ function checkArgs()
 end
 
 if init() then
-  Files.init()
   log("Graffiti initialized.")
+  loadWindows()
   initWindows()
   initDefaultButtons()
-  Files.clear(Files.Log.subDir, Files.Log.name)
   
   if not isAPI then
+    loadWindows()
     checkArgs()
     
     -- Closing Program
     if editMode and saveAfterQuit then
-      Files.save()
+      saveWindows()
     end
     
     out.setTextColor(colors.white)

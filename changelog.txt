@@ -37,3 +37,10 @@ v1.6.1
 - Added ScrollView container.
 - Improved the save-file.
 - Improved performance of window drawing.
+
+v1.6.2
+- Bugfix: The ScrollView wan't scrollable in edit mode.
+- Added "GraffitiData" folder which contains all data for Graffiti.
+- Windows get saved separately now.
+- Added Settings-file.
+- Added multi-language support.
