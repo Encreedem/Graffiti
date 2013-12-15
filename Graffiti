@@ -1847,7 +1847,7 @@ function Objects.editAttributes(self)
       
       if (attrType == "text") then
         if not outIsTerm then
-          drawPixel(1, y, self.Colors.textInputMarker)
+          drawPixel(1, y, ObjectColors.textInputMarker)
         end
         
         local left = #attribute.description + 4
@@ -1878,7 +1878,7 @@ function Objects.editAttributes(self)
         self[attrName] = nextAttr
       elseif (attrType == "number") then
         if not outIsTerm then
-          drawPixel(1, y, self.Colors.textInputMarker)
+          drawPixel(1, y, ObjectColors.textInputMarker)
         end
         
         local left = #attribute.description + 4
@@ -3442,6 +3442,10 @@ end
 
 -- Has to be used instead of paintutils.drawpixel
 function drawPixel(x, y, color)
+  assert(x)
+  assert(y)
+  assert(color)
+  
   out.setCursorPos(x, y)
   out.setBackgroundColor(color)
   out.write(" ")
