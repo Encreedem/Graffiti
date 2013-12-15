@@ -44,3 +44,21 @@ v1.6.2
 - Windows get saved separately now.
 - Added Settings-file.
 - Added multi-language support.
+
+v1.7
+- Added CheckBox object.
+- Added RadioButton object.
+- Added Slider object.
+- Added converter.
+- Added color theme "Fire".
+- Added "load" attribute to some objects and removed the "getVariableValue" and "getProgressBarValue" functions.
+- Improved editor GUI.
+- Implemented "mouse_drag" support for objects and the editor.
+- Changed the event handling of buttons: The user-function with the button's objID attribute (instead of the param attribute) as its name gets called now.
+- Added a list editor and removed the old way of setting the elements of a List object.
+- Renamed "elements" attribute of the List object to "Items" (Just trying out whether it looks better that way).
+- Renamed most tables to have an uppercase first letter.
+- Bugfix: Graffiti crashes after writing something into an Input-object.
+- Bugfix: The move- and scale-pixels of a ProgressBar object had an incorrect position when it was facing up.
+- Bugfix: The Input object isn't read correctly when it was inside a container.
+- Bugfix: The program crashed when you tried to load a non-existent window.
