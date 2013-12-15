@@ -43,7 +43,7 @@ ColorThemes.Default = { -- Used colors: As many as I could get. (black backgroun
   CheckBox = { default = colors.white; active = colors.green; };
   RadioButton = { default = colors.white; active = colors.lime };
   Slider = { default = colors.orange; text = colors.black; active = colors.white; activeText = colors.black };
-  DropDownList = { default = colors.gray; text = colors.white; active = colors.lightBlue; };
+  DropDownList = { default = colors.gray; text = colors.white; active = colors.lightGray; };
   DefaultButtons = {
     default = colors.red;
     text = colors.white;
@@ -257,7 +257,7 @@ local CustomFunctions = {}
 -- Tables
 local Args = { ... }
 local Sides = rs.getSides()
-local ObjectTypes = { "Button", "Text", "Variable", "ProgressBar", "Input", "List", "CheckBox", "RadioButton", "Slider", "Panel", "ScrollView" }
+local ObjectTypes = { "Button", "Text", "Variable", "ProgressBar", "Input", "List", "CheckBox", "RadioButton", "Slider", "DropDownList", "Panel", "ScrollView" }
 local EventTypes = { "quit", "button_clicked", "button_toggled", "selection_changed", "text_changed", "checked", "radio_changed", "slider_changed" }
 local Objects = {}
 local Windows = { Children = {} }
@@ -2185,7 +2185,7 @@ Objects.ProgressBar.getScalePos = function(self)
     return x, y
   end
 end
--- Move and scale pos is wrong when the progress bar goes up.
+
 Objects.ProgressBar.scale = function(self, x, y)
   local moveX, moveY = Objects.getMovePos(self)
   local relMoveX, relMoveY = Path.getRelativePos(self.path, moveX, moveY)
@@ -2684,7 +2684,7 @@ end
 Objects.DropDownList = {}
 Objects.DropDownList.attributes = {
   { description = "Object ID", attrName = "objID", attrType = "text" };
-  { description = "Items", attrName = "items", attrType = "table" };
+  { description = "Items", attrName = "Items", attrType = "table" };
   { description = "Load Function", attrName = "load", attrType = "text" };
 }
 
@@ -2692,15 +2692,16 @@ Objects.DropDownList.new = function(self, maxWidth)
   self.Items = { "empty" }
   self.objID = "newDropDownList"
   self.width = (Size.DropDownList.width > maxWidth) and maxWidth or Size.DropDownList.width
+  self.height = 1
   self.canClick = true
   self.canScale = true
 end
 
-Objects.DropDownList.get = function(self, loadedItems)
+Objects.DropDownList.get = function(self)
   assert(self)
   
-  if loadedItems then
-    self.Items = loadedItems
+  if self.load then
+    self.Items = self.load()
   elseif not self.Items then
     self.Items = { "empty" }
   end
@@ -2709,6 +2710,9 @@ Objects.DropDownList.get = function(self, loadedItems)
   buffer:init(self.width, 1, self.path, ObjectColors.DropDownList.default, ObjectColors.DropDownList.text)
   
   if ObjectData.DropDownList[self.objID] then
+    buffer:addText(1, 1, self.Items[ObjectData.DropDownList[self.objID]])
+  elseif #self.Items > 0 then
+    ObjectData.DropDownList[self.objID] = 1
     buffer:addText(1, 1, self.Items[ObjectData.DropDownList[self.objID]])
   end
   
@@ -2740,14 +2744,14 @@ Objects.DropDownList.click = function(self, x, y)
   out.setTextColor(ObjectColors.DropDownList.text)
   
   for index = 1, height do
-    if (self.Items[index] == ObjectData.DropDownList[self.objID]) then
-      out.setBackgroundColor(ObjectColors.DropDownList.default)
-    else
+    if (index == ObjectData.DropDownList[self.objID]) then
       out.setBackgroundColor(ObjectColors.DropDownList.active)
+    else
+      out.setBackgroundColor(ObjectColors.DropDownList.default)
     end
     
     out.setCursorPos(self.absoluteX, drawY + index - 1)
-    out.write(self.Items[index] .. string.rep(" ", self.width - #self.Items[index] + 1))
+    out.write(self.Items[index] .. string.rep(" ", self.width - #self.Items[index] - 1))
   end
   
   out.setBackgroundColor(ObjectColors.background)
@@ -2758,7 +2762,7 @@ Objects.DropDownList.click = function(self, x, y)
   if (x >= self.absoluteX and
       x <= self.absoluteX + self.width - 1 and
       y >= self.absoluteY + 1 and
-      y <= self.absoluteY + self.height) then
+      y <= self.absoluteY + height) then
     local selectedIndex = y - self.absoluteY
     
     ObjectData.DropDownList[self.objID] = selectedIndex
@@ -2767,6 +2771,18 @@ Objects.DropDownList.click = function(self, x, y)
   drawWindow()
   
   return "selection_changed", { self.objID, ObjectData.DropDownList[self.objID] }
+end
+
+Objects.DropDownList.scale = function(self, x, y)
+  assert(self)
+  assert(x)
+  assert(y)
+  
+  local length = x - self.x + 1
+  
+  if (length >= 3) then
+    self.width = length
+  end
 end
 
 -- >>> Containers
