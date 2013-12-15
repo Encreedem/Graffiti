@@ -59,6 +59,6 @@ v1.7
 - Renamed "elements" attribute of the List object to "Items" (Just trying out whether it looks better that way).
 - Renamed most tables to have an uppercase first letter.
 - Bugfix: Graffiti crashes after writing something into an Input-object.
-- Bugfix: The move- and scale-pixels of a ProgressBar object had an incorrect position when it was facing up.
-- Bugfix: The Input object isn't read correctly when it was inside a container.
+- Bugfix: The move- and scale-pixels of a ProgressBar object have an incorrect position when it was facing up.
+- Bugfix: The Input object isn't reading correctly when it is inside a container.
 - Bugfix: The program crashed when you tried to load a non-existent window.
