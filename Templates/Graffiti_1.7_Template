@@ -1,0 +1,52 @@
+-- Template for Graffiti v1.7
+
+os.loadAPI("Graffiti")
+
+function main()
+	Graffiti.drawWindow("Main") -- Replace this with wthe window that should be drawn on startup.
+	
+	local quit = false
+	
+	while not quit do
+		local event, objectID, p1, p2, p3 = Graffiti.pullEvent()
+		
+		if (event == "quit") then
+			quit = true
+		elseif (event == "button_clicked") then
+			-- A button has been clicked.
+			if (objectID == "newButton") then -- Example of how to "identify" the object.
+				sleep(1) -- Replace this with the code that should be excecuted when the button "newButton" has been clicked.
+				
+			end
+		elseif (event == "button_toggled") then
+			-- A button with "toggle_function" as its function type has been clicked.
+			local buttonState = p1 -- Whether it has been toggled on or off.
+			
+		elseif (event == "selection_changed") then
+			-- An item of a List or DropDownList has been clicked.
+			local key = p1 -- The key of the item in the list that has been clicked.
+			local itemSelected = p2 -- (Only for List objects if their "isMultiselect" attribute is set to true) Determines whether the selection has been toggled on or off.
+			
+		elseif (event == "text_changed") then
+			-- The user entered something into an Input object.
+			local text = p1 -- The entered text.
+			
+		elseif (event == "checked") then
+			-- A CheckBox has been clicked.
+			local state = p1 -- Determines whether the CheckBox has been checked (true) or unchecked (false)
+			
+		elseif (event == "radio_changed") then
+			-- A RadioButton has been clicked.
+			
+		elseif (event == "slider_changed") then
+			-- A Slider object has been clicked.
+			local value = p1 -- The value that has been selected.
+			
+		end
+	end
+	
+	Graffiti.clearScreen()
+end
+
+main()
+os.unloadAPI("Graffiti")
